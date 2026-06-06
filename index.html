@@ -1027,7 +1027,7 @@ var ApiSettings = (function() {
     var payload = {
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ parts: [{ text: userPrompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
+      generationConfig: { temperature: 0.3, maxOutputTokens: 3000 }
     };
     for (var m = 0; m < MODELS.length; m++) {
       var key = getKey();
@@ -1098,15 +1098,14 @@ var AiAnalyze = (function() {
   var _currentAnalysis = '';
 
   var SYS = 'You are an expert Indian stock market trading analyst. ' +
-    'When given a video title and channel name from Indian trading YouTube, analyse it thoroughly. ' +
-    'Respond in JSON with these exact keys: ' +
-    '"summary" (2-3 sentences), ' +
-    '"trading_type" (one or more of: Intraday, Swing, Positional, Long-term Investment), ' +
-    '"assets" (array of asset types mentioned e.g. Nifty50, BankNifty, Midcap, Stocks, Options, Futures, Crypto, Gold, Mutual Funds), ' +
-    '"key_points" (array of 4-6 bullet strings), ' +
-    '"takeaways" (array of 3-4 actionable takeaway strings), ' +
-    '"how_to_steps" (array of 3-5 step strings describing how to apply the strategy). ' +
-    'Return ONLY valid JSON, no markdown, no preamble.';
+    'Given a video title and channel, analyse it and respond ONLY in valid compact JSON with these keys: ' +
+    '"summary": string (2 sentences max), ' +
+    '"trading_type": array of strings (only from: Intraday, Swing, Positional, Investment), ' +
+    '"assets": array of strings (e.g. Nifty50, BankNifty, Options, Stocks), ' +
+    '"key_points": array of 4 short strings (max 12 words each), ' +
+    '"takeaways": array of 3 short strings (max 12 words each), ' +
+    '"how_to_steps": array of 4 short strings (max 15 words each). ' +
+    'No markdown. No preamble. Pure JSON only.';
 
   function renderHtml(data, title) {
     var tradingType = Array.isArray(data.trading_type) ? data.trading_type : [data.trading_type];
@@ -1163,7 +1162,7 @@ var AiAnalyze = (function() {
     btn.classList.add('loading');
     btn.textContent = '⟳ …';
 
-    var prompt = 'Video title: "' + title + '"\nChannel: ' + feed + '\nAnalyse this trading video.';
+    var prompt = 'Video title: "' + title + '"\nChannel: ' + feed + '\nBe concise. Keep every string under 15 words. Return only JSON.';
     var result = await ApiSettings.call(SYS, prompt);
 
     btn.classList.remove('loading');
