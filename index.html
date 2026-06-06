@@ -993,9 +993,10 @@ var ApiSettings = (function() {
     var k2 = (document.getElementById('apiKey2').value || '').trim();
     _keys = [k1, k2].filter(function(k){ return k !== ''; });
     if (_keys.length === 0) { showStatus('err', 'Enter at least one API key.'); return; }
+    _exhausted = {};  // clear exhaustion so new keys work immediately
+    _keyIdx = 0;
     localStorage.setItem('trading_gemini_keys', JSON.stringify(_keys));
     localStorage.setItem('trading_gemini_kidx', '0');
-    _keyIdx = 0;
     showStatus('ok', '✓ Keys saved! AI analysis is now active.');
   }
 
@@ -1022,79 +1023,114 @@ var ApiSettings = (function() {
     setTimeout(function(){ delete _exhausted[key]; }, 600000);
   }
 
-  async function callWithSearch(systemPrompt, userPrompt) {
+  // MAP: cheap/fast model for chunk summarisation
+  async function callMap(prompt) {
+    var MAP_MODELS = ['gemini-3.1-flash-lite', 'gemini-3-flash', 'gemini-2.5-flash'];
+    return callWithModels(prompt, MAP_MODELS, 800);
+  }
+
+  // REDUCE: best model for final synthesis
+  async function callReduce(prompt) {
+    var REDUCE_MODELS = ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+    return callWithModels(prompt, REDUCE_MODELS, 2048);
+  }
+
+  async function callWithModels(prompt, models, maxTokens) {
     if (_keys.length === 0) return null;
     var payload = {
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ parts: [{ text: userPrompt }] }],
-      tools: [{ googleSearch: {} }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 3000 }
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: maxTokens }
     };
-    // Search grounding only works on specific models
-    var searchModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
-    for (var m = 0; m < searchModels.length; m++) {
-      var key = getKey();
+    for (var m = 0; m < models.length; m++) {
+      var key = _keys[0];
+      for (var ki = 0; ki < _keys.length; ki++) {
+        if (!_exhausted[_keys[ki]]) { key = _keys[ki]; break; }
+      }
       if (!key) continue;
       try {
-        var res = await fetch(API_BASE + searchModels[m] + ':generateContent?key=' + key, {
+        var res = await fetch(API_BASE + models[m] + ':generateContent?key=' + key, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
+        var data = await res.json();
         if (res.ok) {
-          var data = await res.json();
           var text = data && data.candidates && data.candidates[0] &&
                      data.candidates[0].content && data.candidates[0].content.parts &&
                      data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
           if (text) return text;
-        } else if (res.status === 429 || res.status === 403) {
-          markExhausted(key);
+        } else {
+          var errMsg = models[m] + ' → HTTP ' + res.status + ': ' + (data.error && data.error.message || '');
+          call._lastError = errMsg;
+          console.warn('[Gemini]', errMsg);
+          if (res.status === 429 || res.status === 403) markExhausted(key);
         }
-      } catch(e) {}
+      } catch(e) {
+        call._lastError = models[m] + ' → ' + e.message;
+        console.warn('[Gemini] fetch error:', e.message);
+      }
     }
-    // Fallback: try without search grounding using full cascade
+    return null;
+  }
+
+  async function callWithSearch(systemPrompt, userPrompt) {
     return call(systemPrompt, userPrompt);
   }
 
   async function call(systemPrompt, userPrompt) {
     if (_keys.length === 0) return null;
+    var lastError = '';
     var payload = {
       systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ parts: [{ text: userPrompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 3000 }
+      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
     };
     for (var m = 0; m < MODELS.length; m++) {
-      var key = getKey();
-      if (!key) continue;
+      var key = _keys[0];
+      for (var ki = 0; ki < _keys.length; ki++) {
+        if (!_exhausted[_keys[ki]]) { key = _keys[ki]; break; }
+      }
+      if (!key) { lastError = 'All keys exhausted'; continue; }
       try {
         var res = await fetch(API_BASE + MODELS[m] + ':generateContent?key=' + key, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
+        var data = await res.json();
         if (res.ok) {
-          var data = await res.json();
           var text = data && data.candidates && data.candidates[0] &&
                      data.candidates[0].content && data.candidates[0].content.parts &&
                      data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
           if (text) return text;
-        } else if (res.status === 429 || res.status === 403) {
-          markExhausted(key);
+          lastError = 'Empty response from ' + MODELS[m];
+        } else {
+          lastError = MODELS[m] + ' → HTTP ' + res.status + ': ' + (data.error && data.error.message || JSON.stringify(data));
+          console.warn('[Gemini]', lastError);
+          if (res.status === 429 || res.status === 403) markExhausted(key);
         }
-      } catch(e) { /* try next */ }
+      } catch(e) {
+        lastError = MODELS[m] + ' → ' + e.message;
+        console.warn('[Gemini] fetch error:', e.message);
+      }
     }
+    // Store last error for caller to display
+    call._lastError = lastError;
     return null;
   }
 
   async function callChat(systemPrompt, history) {
     if (_keys.length === 0) return null;
     var payload = {
-      system_instruction: { parts: [{ text: systemPrompt }] },
+      systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: history,
       generationConfig: { temperature: 0.4, maxOutputTokens: 700 }
     };
     for (var m = 0; m < MODELS.length; m++) {
-      var key = getKey();
+      var key = _keys[0];
+      for (var ki = 0; ki < _keys.length; ki++) {
+        if (!_exhausted[_keys[ki]]) { key = _keys[ki]; break; }
+      }
       if (!key) continue;
       try {
         var res = await fetch(API_BASE + MODELS[m] + ':generateContent?key=' + key, {
@@ -1102,50 +1138,95 @@ var ApiSettings = (function() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
+        var data = await res.json();
         if (res.ok) {
-          var data = await res.json();
           var text = data && data.candidates && data.candidates[0] &&
                      data.candidates[0].content && data.candidates[0].content.parts &&
                      data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
           if (text) return text;
-        } else if (res.status === 429 || res.status === 403) {
-          markExhausted(key);
+        } else {
+          console.warn('[GeminiChat] ' + MODELS[m] + ' status=' + res.status, data.error && data.error.message);
+          if (res.status === 429 || res.status === 403) markExhausted(key);
         }
-      } catch(e) {}
+      } catch(e) { console.warn('[GeminiChat] fetch error:', e.message); }
     }
     return null;
   }
 
   function hasKeys() { return _keys.length > 0; }
+  function getLastError() { return call._lastError || ''; }
 
   load();
-  return { save: save, call: call, callWithSearch: callWithSearch, callChat: callChat, hasKeys: hasKeys };
+  return { save: save, call: call, callMap: callMap, callReduce: callReduce, callChat: callChat, hasKeys: hasKeys, getLastError: getLastError };
 })();
 
 /* =====================================================================
-   SANDBOX 8: AI ANALYZE — Per-video analysis panel
+   SANDBOX 8: AI ANALYZE — Map-Reduce + RAG
    ===================================================================== */
 var AiAnalyze = (function() {
-  var _currentVid = null;
+  var _chunks = [];       // stored for RAG
   var _currentTitle = '';
   var _currentFeed = '';
-  var _currentAnalysis = '';
 
-  var SYS = 'You are an expert Indian stock market trading analyst. ' +
-    'You will be given a YouTube video URL, title and channel. ' +
-    'Use your search/grounding capability to look up the actual video content, description, and any available transcript or summary of this video online. ' +
-    'Then produce a precise, video-specific analysis — NOT generic trading advice. ' +
-    'Every bullet must reflect what is ACTUALLY discussed in this specific video. ' +
-    'Respond ONLY in valid JSON with exactly these keys:\n' +
-    '"summary": (2-3 sentences describing what THIS video specifically covers),\n' +
-    '"trading_type": (array, only from: Intraday, Swing, Positional, Investment),\n' +
-    '"assets": (array of specific assets/instruments actually mentioned in the video),\n' +
-    '"key_points": (array of 5 specific insights or concepts from THIS video),\n' +
-    '"takeaways": (array of 4 concrete, actionable takeaways from THIS video),\n' +
-    '"how_to_steps": (array of 5-6 specific numbered steps the presenter actually explains — this is the most important section, be very specific).\n' +
-    'Return pure JSON only. No markdown. No preamble. No generic advice.';
+  // --- Transcript fetch via allorigins proxy ---
+  async function fetchTranscript(vid) {
+    var endpoints = [
+      'https://api.allorigins.win/get?url=' + encodeURIComponent('https://youtubetranscript.com/?server_vid2=' + vid),
+      'https://api.allorigins.win/get?url=' + encodeURIComponent('https://www.youtube.com/api/timedtext?v=' + vid + '&lang=hi&fmt=json3'),
+      'https://api.allorigins.win/get?url=' + encodeURIComponent('https://www.youtube.com/api/timedtext?v=' + vid + '&lang=en&fmt=json3')
+    ];
+    for (var i = 0; i < endpoints.length; i++) {
+      try {
+        var r = await fetch(endpoints[i]);
+        var j = await r.json();
+        var raw = j.contents || '';
+        // json3 format
+        try {
+          var obj = JSON.parse(raw);
+          if (obj.events) {
+            var lines = obj.events.filter(function(e){ return e.segs; }).map(function(e){
+              return e.segs.map(function(s){ return s.utf8 || ''; }).join('');
+            });
+            var text = lines.join(' ').replace(/\s+/g,' ').trim();
+            if (text.length > 100) return text;
+          }
+        } catch(e2) {}
+        // HTML transcript from youtubetranscript.com
+        var stripped = raw.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/\s+/g,' ').trim();
+        if (stripped.length > 100) return stripped;
+      } catch(e) {}
+    }
+    return '';
+  }
 
-  function renderHtml(data) {
+  // --- Clean transcript (remove timestamps, fillers) ---
+  function cleanTranscript(raw) {
+    var text = raw;
+    text = text.replace(/\[\d{2}:\d{2}:\d{2}\]/g, '');
+    text = text.replace(/\(\d{2}:\d{2}\)/g, '');
+    text = text.replace(/\d{1,2}:\d{2}:\d{2}/g, '');
+    var fillers = ['uh','um','like','basically','तो','है ना','मतलब','ठीक है','देखिए','ना','हाँ'];
+    fillers.forEach(function(f){
+      text = text.replace(new RegExp('\\b' + f + '\\b', 'gi'), '');
+    });
+    text = text.replace(/\n+/g,' ').replace(/\s{2,}/g,' ');
+    return text.trim();
+  }
+
+  // --- Chunk text ---
+  function chunkText(text, maxLen) {
+    var words = text.split(' ');
+    var chunks = [], cur = '';
+    words.forEach(function(w){
+      if ((cur + w).length > maxLen) { if (cur) chunks.push(cur.trim()); cur = ''; }
+      cur += w + ' ';
+    });
+    if (cur.trim()) chunks.push(cur.trim());
+    return chunks;
+  }
+
+  // --- Render HTML from final JSON ---
+  function renderHtml(data, hasTranscript) {
     var tradingType = Array.isArray(data.trading_type) ? data.trading_type : [data.trading_type];
     var assets = Array.isArray(data.assets) ? data.assets : [data.assets];
     var keyPoints = Array.isArray(data.key_points) ? data.key_points : [];
@@ -1157,13 +1238,26 @@ var AiAnalyze = (function() {
     var kpHtml = keyPoints.map(function(k){ return '<p>• '+k+'</p>'; }).join('');
     var twHtml = takeaways.map(function(t){ return '<p>• '+t+'</p>'; }).join('');
     var stHtml = steps.map(function(s,i){ return '<p>'+(i+1)+'. '+s+'</p>'; }).join('');
+    var srcBadge = hasTranscript
+      ? '<div style="font-size:11px;color:var(--series-hl);font-weight:700;margin-bottom:8px;">✓ Based on actual video transcript (Map-Reduce)</div>'
+      : '<div style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:8px;">⚠ Transcript unavailable — based on title context</div>';
 
-    return '<strong>📋 Summary</strong><p>'+(data.summary||'')+'</p>' +
-           '<strong>📊 Trading Type</strong><p>' + tags + '</p>' +
-           '<strong>💼 Assets / Instruments</strong><p>' + assetTags + '</p>' +
-           '<strong>🔑 Key Points</strong>' + kpHtml +
-           '<strong>✅ Takeaways</strong>' + twHtml +
-           '<strong>🛠 How to Implement (Step by Step)</strong>' + stHtml;
+    return srcBadge +
+      '<strong>📋 Summary</strong><p>'+(data.summary||'')+'</p>' +
+      '<strong>📊 Trading Type</strong><p>' + tags + '</p>' +
+      '<strong>💼 Assets / Instruments</strong><p>' + assetTags + '</p>' +
+      '<strong>🔑 Key Points</strong>' + kpHtml +
+      '<strong>✅ Takeaways</strong>' + twHtml +
+      '<strong>🛠 How to Implement (Step by Step)</strong>' + stHtml +
+      '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">Tap ⚡ Thunder to probe deeper about this video.</div>';
+  }
+
+  // --- Parse JSON safely ---
+  function parseJson(raw) {
+    var clean = raw.replace(/```json|```/g,'').trim();
+    var s = clean.indexOf('{'), e = clean.lastIndexOf('}');
+    if (s !== -1 && e !== -1) clean = clean.substring(s, e+1);
+    return JSON.parse(clean);
   }
 
   async function run(item, btn) {
@@ -1175,7 +1269,6 @@ var AiAnalyze = (function() {
     var vid = item.getAttribute('data-vid');
     var title = item.getAttribute('data-title') || '';
     var feed = item.getAttribute('data-feed') || '';
-    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
     // Toggle existing panel
     var existingPanel = item.nextElementSibling;
@@ -1187,62 +1280,101 @@ var AiAnalyze = (function() {
     // Create panel
     var panel = document.createElement('div');
     panel.className = 'ai-panel open';
-    panel.id = 'ai-panel-' + vid;
     panel.innerHTML =
-      '<div class="ai-panel-hdr">' +
-        '<span>⚡ AI Analysis</span>' +
-        '<button class="ai-panel-close" onclick="this.closest(\'.ai-panel\').classList.remove(\'open\')">✕</button>' +
-      '</div>' +
-      '<div class="ai-panel-body"><span class="spin">⟳</span> Gemini is analysing the video…</div>';
-
+      '<div class="ai-panel-hdr"><span>⚡ AI Analysis</span>' +
+      '<button class="ai-panel-close" onclick="this.closest(\'.ai-panel\').classList.remove(\'open\')">✕</button></div>' +
+      '<div class="ai-panel-body"><span class="spin">⟳</span> Fetching transcript…</div>';
     item.insertAdjacentElement('afterend', panel);
     btn.classList.add('loading');
     btn.textContent = '⟳ …';
 
     var body = panel.querySelector('.ai-panel-body');
+    _currentTitle = title;
+    _currentFeed = feed;
 
-    // Single prompt — Gemini searches and analyses the video itself
-    var prompt =
-      'Analyse this YouTube trading video:\n' +
-      'Title: "' + title + '"\n' +
-      'Channel: ' + feed + '\n' +
-      'URL: ' + ytUrl + '\n\n' +
-      'Search for and read the actual content of this video (transcript, description, auto-captions, or any published summary). ' +
-      'Then produce a detailed, video-specific JSON analysis. ' +
-      'The "how_to_steps" section must contain the actual step-by-step method the presenter teaches — be very specific. ' +
-      'Do NOT produce generic trading advice. Every point must be grounded in what this specific video actually says.';
+    // STEP 1: Fetch + clean transcript
+    var raw = await fetchTranscript(vid);
+    var hasTranscript = raw.length > 100;
+    var finalResult = '';
 
-    var result = await ApiSettings.callWithSearch(SYS, prompt);
+    if (hasTranscript) {
+      var cleaned = cleanTranscript(raw);
+      _chunks = chunkText(cleaned, 500);
+      body.innerHTML = '<span class="spin">⟳</span> Transcript found (' + _chunks.length + ' chunks) — MAP phase…';
+
+      // STEP 2: MAP — summarise each chunk with lighter model
+      var MAP_PROMPT = 'Extract key trading points, assets, rules, and steps from this text. Output concise bullets only. Text: ';
+      var chunkSummaries = [];
+      for (var i = 0; i < _chunks.length; i++) {
+        body.innerHTML = '<span class="spin">⟳</span> MAP ' + (i+1) + '/' + _chunks.length + '…';
+        var s = await ApiSettings.callMap(MAP_PROMPT + _chunks[i]);
+        if (s) chunkSummaries.push(s);
+      }
+
+      // STEP 3: REDUCE — synthesise into final JSON
+      body.innerHTML = '<span class="spin">⟳</span> Synthesising final analysis…';
+      var combined = chunkSummaries.join('\n');
+      var REDUCE_PROMPT =
+        'You are an expert Indian stock market analyst. ' +
+        'Below are bullet-point summaries extracted from a trading video titled "' + title + '" by channel "' + feed + '".\n\n' +
+        combined + '\n\n' +
+        'Synthesise these into a structured JSON with keys: ' +
+        '"summary" (2-3 sentences specific to this video), ' +
+        '"trading_type" (array: Intraday/Swing/Positional/Investment), ' +
+        '"assets" (array of instruments mentioned), ' +
+        '"key_points" (array of 5 specific points from the video), ' +
+        '"takeaways" (array of 4 actionable takeaways from the video), ' +
+        '"how_to_steps" (array of 5-6 exact steps the presenter explains). ' +
+        'Return pure JSON only. No markdown. No generic advice.';
+      finalResult = await ApiSettings.callReduce(REDUCE_PROMPT);
+
+    } else {
+      // No transcript — single call with title context
+      body.innerHTML = '<span class="spin">⟳</span> No transcript — analysing from title…';
+      _chunks = [];
+      var TITLE_PROMPT =
+        'You are an expert Indian stock market analyst. ' +
+        'Analyse this trading video based on its title and channel context.\n' +
+        'Title: "' + title + '"\nChannel: ' + feed + '\n\n' +
+        'Return JSON with keys: "summary", "trading_type", "assets", "key_points", "takeaways", "how_to_steps". ' +
+        'Be specific to the topic in the title. No generic advice. Pure JSON only.';
+      finalResult = await ApiSettings.callReduce(TITLE_PROMPT);
+    }
 
     btn.classList.remove('loading');
     btn.textContent = '⚡ Analyse';
 
-    if (!result) {
-      body.innerHTML = '<span style="color:#7a2020">⚠ Analysis failed. Check your API key or try again.</span>';
+    if (!finalResult) {
+      var err = ApiSettings.getLastError ? ApiSettings.getLastError() : '';
+      body.innerHTML = '<span style="color:#7a2020">⚠ Analysis failed.<br>' + (err || 'Check API key and try again.') + '</span>';
       return;
     }
 
     try {
-      var clean = result.replace(/```json[\s\S]*?```/g, function(m){ return m.replace(/```json|```/g,''); }).replace(/```/g,'').trim();
-      // Find the JSON object
-      var jsonStart = clean.indexOf('{');
-      var jsonEnd = clean.lastIndexOf('}');
-      if (jsonStart !== -1 && jsonEnd !== -1) clean = clean.substring(jsonStart, jsonEnd + 1);
-      var data = JSON.parse(clean);
-      body.innerHTML = renderHtml(data) +
-        '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--series-hl);font-weight:700;">✓ Analysed via Gemini Search Grounding</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:3px;">Tap ⚡ Thunder to ask follow-up questions about this video.</div>';
-      _currentVid = vid; _currentTitle = title; _currentFeed = feed; _currentAnalysis = JSON.stringify(data);
-      Thunder.setContext(title, feed, JSON.stringify(data));
+      var data = parseJson(finalResult);
+      body.innerHTML = renderHtml(data, hasTranscript);
+      Thunder.setContext(title, feed, _chunks, JSON.stringify(data));
     } catch(e) {
-      // Show raw result if JSON parse fails
-      body.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6;">' + result.replace(/</g,'&lt;') + '</div>';
-      _currentVid = vid; _currentTitle = title; _currentFeed = feed; _currentAnalysis = result;
-      Thunder.setContext(title, feed, result);
+      body.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;">' + finalResult.replace(/</g,'&lt;') + '</div>';
+      Thunder.setContext(title, feed, _chunks, finalResult);
     }
   }
 
-  return { run: run };
+  // RAG: find most relevant chunk for a user query
+  function findRelevantChunk(query) {
+    if (!_chunks.length) return '';
+    var words = query.toLowerCase().split(/\W+/).filter(function(w){ return w.length > 3; });
+    if (!words.length) return _chunks[0];
+    var best = _chunks[0], maxScore = -1;
+    _chunks.forEach(function(chunk){
+      var score = 0, lc = chunk.toLowerCase();
+      words.forEach(function(w){ if (lc.indexOf(w) !== -1) score++; });
+      if (score > maxScore) { maxScore = score; best = chunk; }
+    });
+    return best;
+  }
+
+  return { run: run, findRelevantChunk: findRelevantChunk, getChunks: function(){ return _chunks; } };
 })();
 
 /* =====================================================================
@@ -1253,6 +1385,7 @@ var Thunder = (function() {
   var tHistory = [];
   var _videoCtx = '';
   var _videoTitle = '';
+  var _chunks = [];
 
   var SYS_BASE = 'You are an expert Indian stock market trading coach and analyst. ' +
     'You specialise in Indian markets: NSE, BSE, Nifty50, BankNifty, F&O, equity, MF, and commodities. ' +
@@ -1265,12 +1398,12 @@ var Thunder = (function() {
     return SYS_BASE;
   }
 
-  function setContext(title, feed, analysis) {
+  function setContext(title, feed, chunks, analysis) {
     _videoTitle = title + ' (' + feed + ')';
     _videoCtx = analysis;
+    _chunks = Array.isArray(chunks) ? chunks : [];
     var lbl = document.getElementById('thunder-ctx-label');
     if (lbl) lbl.textContent = '⚡ Context: ' + title.substring(0, 45) + (title.length > 45 ? '…' : '');
-    // Reset chat for new context
     tHistory = [];
     var msgs = document.getElementById('thunder-messages');
     if (msgs) msgs.innerHTML = '<div class="tmsg ai"><div class="tbubble ai">Video loaded: <b>' + title.replace(/</g,'&lt;') + '</b><br>Ask me anything about this trading strategy!</div></div>';
@@ -1320,17 +1453,39 @@ var Thunder = (function() {
     }
 
     appendMsg('user', text);
-    tHistory.push({ role: 'user', parts: [{ text: text }] });
     setTyping(true);
 
-    var result = await ApiSettings.callChat(getSys(), tHistory);
+    // RAG: find most relevant transcript chunk for this query
+    var relevantChunk = '';
+    if (_chunks.length > 0) {
+      var words = text.toLowerCase().split(/\W+/).filter(function(w){ return w.length > 3; });
+      var best = _chunks[0], maxScore = -1;
+      _chunks.forEach(function(chunk){
+        var score = 0, lc = chunk.toLowerCase();
+        words.forEach(function(w){ if (lc.indexOf(w) !== -1) score++; });
+        if (score > maxScore) { maxScore = score; best = chunk; }
+      });
+      relevantChunk = best;
+    }
+
+    // Build prompt with RAG context
+    var ragContext = relevantChunk
+      ? 'Relevant transcript excerpt: "' + relevantChunk + '"\n\n'
+      : (_videoCtx ? 'Video analysis: ' + _videoCtx + '\n\n' : '');
+
+    var sys = 'You are an expert Indian stock market trading coach. ' +
+      'Video: "' + _videoTitle + '". ' +
+      'Answer ONLY based on the video context provided. Be specific and concise. Max 150 words.';
+
+    var prompt = ragContext + 'User question: ' + text + '\nAnswer concisely based ONLY on the context above.';
+
+    var result = await ApiSettings.callChat(sys, [{ role: 'user', parts: [{ text: prompt }] }]);
     setTyping(false);
 
     if (result) {
-      tHistory.push({ role: 'model', parts: [{ text: result }] });
       appendMsg('ai', result);
     } else {
-      appendMsg('ai', '⚠ All models failed or quota exhausted. Check your API keys in the API Keys tab.');
+      appendMsg('ai', '⚠ Failed. Check API key or try again.');
     }
   }
 
