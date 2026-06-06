@@ -1027,7 +1027,7 @@ var ApiSettings = (function() {
     var payload = {
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ parts: [{ text: userPrompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 1200 }
+      generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
     };
     for (var m = 0; m < MODELS.length; m++) {
       var key = getKey();
@@ -1177,6 +1177,11 @@ var AiAnalyze = (function() {
 
     try {
       var clean = result.replace(/```json|```/g, '').trim();
+      // Repair truncated JSON by closing open arrays/objects
+      var openBraces = (clean.match(/\{/g)||[]).length - (clean.match(/\}/g)||[]).length;
+      var openBrackets = (clean.match(/\[/g)||[]).length - (clean.match(/\]/g)||[]).length;
+      if (openBrackets > 0) clean += ']'.repeat(openBrackets);
+      if (openBraces > 0) clean += '}'.repeat(openBraces);
       var data = JSON.parse(clean);
       body.innerHTML = renderHtml(data, title);
       // Load into Thunder context
