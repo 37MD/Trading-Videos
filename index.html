@@ -1022,6 +1022,40 @@ var ApiSettings = (function() {
     setTimeout(function(){ delete _exhausted[key]; }, 600000);
   }
 
+  async function callWithSearch(systemPrompt, userPrompt) {
+    if (_keys.length === 0) return null;
+    var payload = {
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: userPrompt }] }],
+      tools: [{ googleSearch: {} }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 3000 }
+    };
+    // Search grounding only works on specific models
+    var searchModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
+    for (var m = 0; m < searchModels.length; m++) {
+      var key = getKey();
+      if (!key) continue;
+      try {
+        var res = await fetch(API_BASE + searchModels[m] + ':generateContent?key=' + key, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          var data = await res.json();
+          var text = data && data.candidates && data.candidates[0] &&
+                     data.candidates[0].content && data.candidates[0].content.parts &&
+                     data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+          if (text) return text;
+        } else if (res.status === 429 || res.status === 403) {
+          markExhausted(key);
+        }
+      } catch(e) {}
+    }
+    // Fallback: try without search grounding using full cascade
+    return call(systemPrompt, userPrompt);
+  }
+
   async function call(systemPrompt, userPrompt) {
     if (_keys.length === 0) return null;
     var payload = {
@@ -1085,7 +1119,7 @@ var ApiSettings = (function() {
   function hasKeys() { return _keys.length > 0; }
 
   load();
-  return { save: save, call: call, callChat: callChat, hasKeys: hasKeys, API_BASE: API_BASE };
+  return { save: save, call: call, callWithSearch: callWithSearch, callChat: callChat, hasKeys: hasKeys };
 })();
 
 /* =====================================================================
@@ -1098,89 +1132,38 @@ var AiAnalyze = (function() {
   var _currentAnalysis = '';
 
   var SYS = 'You are an expert Indian stock market trading analyst. ' +
-    'When a transcript is provided, analyse ONLY what is actually said in it — extract the specific setups, indicators, rules, and steps the speaker actually mentions. ' +
-    'Do NOT add generic trading advice not present in the transcript. ' +
-    'Respond ONLY in valid compact JSON with these keys: ' +
-    '"summary": string (2 sentences, specific to video content), ' +
-    '"trading_type": array (only from: Intraday, Swing, Positional, Investment), ' +
-    '"assets": array of strings (only assets actually mentioned), ' +
-    '"key_points": array of 4-5 strings (specific points from the video, not generic advice), ' +
-    '"takeaways": array of 3-4 strings (actual conclusions from the video), ' +
-    '"how_to_steps": array of 4-6 strings (exact steps or rules the speaker describes). ' +
-    'No markdown. No preamble. Pure JSON only.';
+    'You will be given a YouTube video URL, title and channel. ' +
+    'Use your search/grounding capability to look up the actual video content, description, and any available transcript or summary of this video online. ' +
+    'Then produce a precise, video-specific analysis — NOT generic trading advice. ' +
+    'Every bullet must reflect what is ACTUALLY discussed in this specific video. ' +
+    'Respond ONLY in valid JSON with exactly these keys:\n' +
+    '"summary": (2-3 sentences describing what THIS video specifically covers),\n' +
+    '"trading_type": (array, only from: Intraday, Swing, Positional, Investment),\n' +
+    '"assets": (array of specific assets/instruments actually mentioned in the video),\n' +
+    '"key_points": (array of 5 specific insights or concepts from THIS video),\n' +
+    '"takeaways": (array of 4 concrete, actionable takeaways from THIS video),\n' +
+    '"how_to_steps": (array of 5-6 specific numbered steps the presenter actually explains — this is the most important section, be very specific).\n' +
+    'Return pure JSON only. No markdown. No preamble. No generic advice.';
 
-  function renderHtml(data, title) {
+  function renderHtml(data) {
     var tradingType = Array.isArray(data.trading_type) ? data.trading_type : [data.trading_type];
     var assets = Array.isArray(data.assets) ? data.assets : [data.assets];
     var keyPoints = Array.isArray(data.key_points) ? data.key_points : [];
     var takeaways = Array.isArray(data.takeaways) ? data.takeaways : [];
     var steps = Array.isArray(data.how_to_steps) ? data.how_to_steps : [];
 
-    var tags = tradingType.map(function(t){ return '<span class="ai-tag">'+t+'</span>'; }).join('');
-    var assetTags = assets.map(function(a){ return '<span class="ai-tag">'+a+'</span>'; }).join('');
+    var tags = tradingType.filter(Boolean).map(function(t){ return '<span class="ai-tag">'+t+'</span>'; }).join('');
+    var assetTags = assets.filter(Boolean).map(function(a){ return '<span class="ai-tag">'+a+'</span>'; }).join('');
     var kpHtml = keyPoints.map(function(k){ return '<p>• '+k+'</p>'; }).join('');
     var twHtml = takeaways.map(function(t){ return '<p>• '+t+'</p>'; }).join('');
     var stHtml = steps.map(function(s,i){ return '<p>'+(i+1)+'. '+s+'</p>'; }).join('');
 
     return '<strong>📋 Summary</strong><p>'+(data.summary||'')+'</p>' +
-           '<strong>📊 Trading Type</strong>' + tags +
-           '<strong>💼 Asset Classes</strong>' + assetTags +
+           '<strong>📊 Trading Type</strong><p>' + tags + '</p>' +
+           '<strong>💼 Assets / Instruments</strong><p>' + assetTags + '</p>' +
            '<strong>🔑 Key Points</strong>' + kpHtml +
            '<strong>✅ Takeaways</strong>' + twHtml +
-           '<strong>🛠 How to Apply</strong>' + stHtml +
-           '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);">Use the ⚡ Thunder button to probe deeper about this video.</div>';
-  }
-
-  /* ---- Transcript fetcher via YouTube timedtext API + proxies ---- */
-  async function fetchTranscript(vid) {
-    var ttUrl = 'https://www.youtube.com/api/timedtext?v=' + vid + '&lang=hi&fmt=srv3';
-    var ttUrlEn = 'https://www.youtube.com/api/timedtext?v=' + vid + '&lang=en&fmt=srv3';
-    var listUrl = 'https://www.youtube.com/api/timedtext?v=' + vid + '&type=list';
-
-    var proxies = [
-      function(u){ return fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(u)).then(function(r){ return r.json(); }).then(function(d){ return d.contents || ''; }); },
-      function(u){ return fetch('https://corsproxy.io/?' + encodeURIComponent(u)).then(function(r){ return r.text(); }); },
-      function(u){ return fetch('https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u)).then(function(r){ return r.text(); }); }
-    ];
-
-    function parseXmlTranscript(xml) {
-      if (!xml || xml.length < 30) return '';
-      var parts = [], re = /<text[^>]*>([^<]*)<\/text>/g, m;
-      while ((m = re.exec(xml)) !== null) {
-        var t = m[1].replace(/&#39;/g,"'").replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').trim();
-        if (t) parts.push(t);
-      }
-      return parts.join(' ');
-    }
-
-    // Try Hindi then English transcript via each proxy
-    for (var pi = 0; pi < proxies.length; pi++) {
-      for (var li = 0; li < 2; li++) {
-        var url = li === 0 ? ttUrl : ttUrlEn;
-        try {
-          var xml = await proxies[pi](url);
-          var text = parseXmlTranscript(xml);
-          if (text && text.length > 100) return text.substring(0, 6000);
-        } catch(e) {}
-      }
-    }
-
-    // Try fetching the track list to discover available languages
-    for (var pi2 = 0; pi2 < proxies.length; pi2++) {
-      try {
-        var listXml = await proxies[pi2](listUrl);
-        var langMatch = listXml && listXml.match(/lang_code="([^"]+)"/);
-        if (langMatch) {
-          var detectedLang = langMatch[1];
-          var detectedUrl = 'https://www.youtube.com/api/timedtext?v=' + vid + '&lang=' + detectedLang + '&fmt=srv3';
-          var xml2 = await proxies[pi2](detectedUrl);
-          var text2 = parseXmlTranscript(xml2);
-          if (text2 && text2.length > 100) return text2.substring(0, 6000);
-        }
-      } catch(e) {}
-    }
-
-    return ''; // transcript unavailable
+           '<strong>🛠 How to Implement (Step by Step)</strong>' + stHtml;
   }
 
   async function run(item, btn) {
@@ -1190,10 +1173,11 @@ var AiAnalyze = (function() {
     }
 
     var vid = item.getAttribute('data-vid');
-    var title = item.getAttribute('data-title') || item.getAttribute('data-feed');
-    var feed = item.getAttribute('data-feed');
+    var title = item.getAttribute('data-title') || '';
+    var feed = item.getAttribute('data-feed') || '';
+    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
-    // Toggle if same panel already exists
+    // Toggle existing panel
     var existingPanel = item.nextElementSibling;
     if (existingPanel && existingPanel.classList.contains('ai-panel')) {
       existingPanel.classList.toggle('open');
@@ -1209,7 +1193,7 @@ var AiAnalyze = (function() {
         '<span>⚡ AI Analysis</span>' +
         '<button class="ai-panel-close" onclick="this.closest(\'.ai-panel\').classList.remove(\'open\')">✕</button>' +
       '</div>' +
-      '<div class="ai-panel-body"><span class="spin">⟳</span> Fetching transcript…</div>';
+      '<div class="ai-panel-body"><span class="spin">⟳</span> Gemini is analysing the video…</div>';
 
     item.insertAdjacentElement('afterend', panel);
     btn.classList.add('loading');
@@ -1217,28 +1201,18 @@ var AiAnalyze = (function() {
 
     var body = panel.querySelector('.ai-panel-body');
 
-    // Step 1: fetch transcript
-    var transcript = await fetchTranscript(vid);
-    var hasTranscript = transcript && transcript.length > 100;
+    // Single prompt — Gemini searches and analyses the video itself
+    var prompt =
+      'Analyse this YouTube trading video:\n' +
+      'Title: "' + title + '"\n' +
+      'Channel: ' + feed + '\n' +
+      'URL: ' + ytUrl + '\n\n' +
+      'Search for and read the actual content of this video (transcript, description, auto-captions, or any published summary). ' +
+      'Then produce a detailed, video-specific JSON analysis. ' +
+      'The "how_to_steps" section must contain the actual step-by-step method the presenter teaches — be very specific. ' +
+      'Do NOT produce generic trading advice. Every point must be grounded in what this specific video actually says.';
 
-    if (hasTranscript) {
-      body.innerHTML = '<span class="spin">⟳</span> Transcript found — analysing with AI…';
-    } else {
-      body.innerHTML = '<span class="spin">⟳</span> No transcript available — analysing from title…';
-    }
-
-    // Step 2: build prompt with or without transcript
-    var prompt;
-    if (hasTranscript) {
-      prompt = 'YouTube Video Title: "' + title + '"\nChannel: ' + feed +
-        '\n\nFULL TRANSCRIPT:\n' + transcript +
-        '\n\nAnalyse the ACTUAL content of this transcript. Extract specific strategies, indicators, setups, and steps mentioned. Do NOT give generic advice. Return only JSON.';
-    } else {
-      prompt = 'YouTube Video Title: "' + title + '"\nChannel: ' + feed +
-        '\n\nNo transcript available. Based on the title and channel context, give your best specific analysis. Be concise, max 12 words per bullet. Return only JSON.';
-    }
-
-    var result = await ApiSettings.call(SYS, prompt);
+    var result = await ApiSettings.callWithSearch(SYS, prompt);
 
     btn.classList.remove('loading');
     btn.textContent = '⚡ Analyse';
@@ -1249,20 +1223,20 @@ var AiAnalyze = (function() {
     }
 
     try {
-      var clean = result.replace(/```json|```/g, '').trim();
-      var openBraces = (clean.match(/\{/g)||[]).length - (clean.match(/\}/g)||[]).length;
-      var openBrackets = (clean.match(/\[/g)||[]).length - (clean.match(/\]/g)||[]).length;
-      if (openBrackets > 0) clean += ']'.repeat(openBrackets);
-      if (openBraces > 0) clean += '}'.repeat(openBraces);
+      var clean = result.replace(/```json[\s\S]*?```/g, function(m){ return m.replace(/```json|```/g,''); }).replace(/```/g,'').trim();
+      // Find the JSON object
+      var jsonStart = clean.indexOf('{');
+      var jsonEnd = clean.lastIndexOf('}');
+      if (jsonStart !== -1 && jsonEnd !== -1) clean = clean.substring(jsonStart, jsonEnd + 1);
       var data = JSON.parse(clean);
-      var srcNote = hasTranscript
-        ? '<div style="margin-top:8px;font-size:11px;color:var(--series-hl);font-weight:700;">✓ Based on actual video transcript</div>'
-        : '<div style="margin-top:8px;font-size:11px;color:var(--muted);font-weight:700;">⚠ Transcript unavailable — based on title only</div>';
-      body.innerHTML = renderHtml(data, title) + srcNote + '<div style="margin-top:6px;font-size:12px;color:var(--muted);">Use the ⚡ Thunder button to probe deeper about this video.</div>';
-      _currentVid = vid; _currentTitle = title; _currentFeed = feed; _currentAnalysis = clean;
-      Thunder.setContext(title, feed, clean);
+      body.innerHTML = renderHtml(data) +
+        '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--series-hl);font-weight:700;">✓ Analysed via Gemini Search Grounding</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:3px;">Tap ⚡ Thunder to ask follow-up questions about this video.</div>';
+      _currentVid = vid; _currentTitle = title; _currentFeed = feed; _currentAnalysis = JSON.stringify(data);
+      Thunder.setContext(title, feed, JSON.stringify(data));
     } catch(e) {
-      body.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;">' + result.replace(/</g,'&lt;') + '</div>';
+      // Show raw result if JSON parse fails
+      body.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6;">' + result.replace(/</g,'&lt;') + '</div>';
       _currentVid = vid; _currentTitle = title; _currentFeed = feed; _currentAnalysis = result;
       Thunder.setContext(title, feed, result);
     }
