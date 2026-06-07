@@ -1052,7 +1052,10 @@ var ApiSettings = (function() {
   }
 
   load();
-  return { save: save, hasKeys: hasKeys, getLastError: getLastError, callGeminiApi: callGeminiApi };
+  function getKey() { return _keys[_currentKeyIndex] || _keys[0] || null; }
+
+  load();
+  return { save: save, hasKeys: hasKeys, getLastError: getLastError, getKey: getKey, callGeminiApi: callGeminiApi };
 })();
 
 /* =====================================================================
@@ -1175,6 +1178,7 @@ var AiAnalyze = (function() {
     var vid   = item.getAttribute('data-vid');
     var title = item.getAttribute('data-title') || '';
     var feed  = item.getAttribute('data-feed') || '';
+    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
     // Toggle existing panel
     var next = item.nextElementSibling;
@@ -1185,43 +1189,62 @@ var AiAnalyze = (function() {
     panel.innerHTML =
       '<div class="ai-panel-hdr"><span>⚡ AI Analysis</span>'+
       '<button class="ai-panel-close" onclick="this.closest(\'.ai-panel\').classList.remove(\'open\')">✕</button></div>'+
-      '<div class="ai-panel-body"><span class="spin">⟳</span> Fetching transcript…</div>';
+      '<div class="ai-panel-body"><span class="spin">⟳</span> Sending video to Gemini…</div>';
     item.insertAdjacentElement('afterend', panel);
     btn.classList.add('loading'); btn.textContent = '⟳ …';
 
     var body = panel.querySelector('.ai-panel-body');
+    var apiKey = ApiSettings.getKey();
 
-    // STEP 1: Actually call fetchTranscript
-    var transcriptRaw = await fetchTranscript(vid);
+    // Use Gemini's native video understanding via fileData
+    var payload = {
+      contents: [{
+        parts: [
+          {
+            fileData: {
+              mimeType: 'video/*',
+              fileUri: ytUrl
+            }
+          },
+          {
+            text:
+              'You are an expert Indian stock market trading analyst.\n' +
+              'Watch this video carefully and analyse its ACTUAL content.\n\n' +
+              'Return a JSON object with these exact keys:\n' +
+              '"summary": 2-3 sentences on what this video specifically covers,\n' +
+              '"trading_type": array (only from: Intraday, Swing, Positional, Investment),\n' +
+              '"assets": array of instruments actually mentioned,\n' +
+              '"key_points": array of 5 specific insights from this video,\n' +
+              '"takeaways": array of 4 actionable takeaways from this video,\n' +
+              '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
+              'Pure JSON only. No markdown. No generic advice.'
+          }
+        ]
+      }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+    };
 
-    if (!transcriptRaw || transcriptRaw.length < 50) {
-      body.innerHTML = '<span style="color:#7a2020;font-weight:bold;">⚠ No transcript available for this video. Cannot analyse.</span>';
-      btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
-      return;
+    // gemini-2.0-flash supports native video URL understanding
+    var models = ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+    var finalResult = null;
+
+    for (var m = 0; m < models.length; m++) {
+      try {
+        var res = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models/' + models[m] + ':generateContent?key=' + apiKey,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+        );
+        var data = await res.json();
+        if (res.ok) {
+          var text = data.candidates && data.candidates[0] &&
+                     data.candidates[0].content && data.candidates[0].content.parts &&
+                     data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+          if (text) { finalResult = text; break; }
+        } else {
+          console.warn('[Video] ' + models[m] + ' HTTP ' + res.status, data.error && data.error.message);
+        }
+      } catch(e) { console.warn('[Video] ' + models[m], e.message); }
     }
-
-    // STEP 2: Clean transcript and chunk it
-    var transcriptClean = optimizeTranscriptForTokens(transcriptRaw);
-
-    // Store actual transcript chunks for Thunder RAG
-    transcriptChunksGlobal = chunkText(transcriptClean, 500);
-
-    body.innerHTML = '<span class="spin">⟳</span> Transcript: ' + transcriptRaw.length + ' chars → ' + transcriptChunksGlobal.length + ' chunks. Analysing…';
-
-    // STEP 3: Pass actual transcript to Gemini
-    var prompt =
-      'Analyse the following transcript of a YouTube trading video titled "' + title + '" from channel "' + feed + '".\n\n' +
-      'Transcript:\n' + transcriptClean.substring(0, 30000) + '\n\n' +
-      'Based ONLY on the transcript above, return JSON with these exact keys:\n' +
-      '"summary": 2-3 sentences describing what this video specifically covers,\n' +
-      '"trading_type": array (only: Intraday/Swing/Positional/Investment),\n' +
-      '"assets": array of instruments actually mentioned,\n' +
-      '"key_points": array of 5 specific insights from this video,\n' +
-      '"takeaways": array of 4 actionable takeaways from this video,\n' +
-      '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
-      'Pure JSON only. No markdown. No generic advice not in the transcript.';
-
-    var finalResult = await ApiSettings.callGeminiApi(prompt, 0);
 
     btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
 
@@ -1234,12 +1257,13 @@ var AiAnalyze = (function() {
       var clean = finalResult.replace(/```json|```/g,'').trim();
       var s2 = clean.indexOf('{'), e2 = clean.lastIndexOf('}');
       if (s2 !== -1 && e2 !== -1) clean = clean.substring(s2, e2+1);
-      var data = JSON.parse(clean);
-      body.innerHTML = renderHtml(data, true);
-      // Pass actual transcript chunks to Thunder for RAG
+      var parsed = JSON.parse(clean);
+      body.innerHTML = renderHtml(parsed, true);
+      transcriptChunksGlobal = chunkText(clean, 500);
       Thunder.setContext(title, feed, transcriptChunksGlobal);
     } catch(err) {
       body.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;">' + finalResult.replace(/</g,'&lt;') + '</div>';
+      transcriptChunksGlobal = [finalResult];
       Thunder.setContext(title, feed, transcriptChunksGlobal);
     }
   }
