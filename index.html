@@ -1084,29 +1084,69 @@ var AiAnalyze = (function() {
   }
 
   async function fetchTranscript(vid) {
-    var urls = [
-      'https://api.allorigins.win/get?url=' + encodeURIComponent('https://www.youtube.com/api/timedtext?v=' + vid + '&lang=hi&fmt=json3'),
-      'https://api.allorigins.win/get?url=' + encodeURIComponent('https://www.youtube.com/api/timedtext?v=' + vid + '&lang=en&fmt=json3'),
-      'https://api.allorigins.win/get?url=' + encodeURIComponent('https://youtubetranscript.com/?server_vid2=' + vid)
-    ];
-    for (var i = 0; i < urls.length; i++) {
-      try {
-        var r = await fetch(urls[i]);
+    // Try multiple transcript sources
+    var sources = [
+      // Source 1: youtubetranscript.com (most reliable for Hindi/English)
+      async function() {
+        var r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://youtubetranscript.com/?server_vid2=' + vid));
         var j = await r.json();
         var raw = j.contents || '';
-        try {
-          var obj = JSON.parse(raw);
-          if (obj.events) {
-            var t = obj.events.filter(function(e){ return e.segs; })
-              .map(function(e){ return e.segs.map(function(s){ return s.utf8||''; }).join(''); })
-              .join(' ').replace(/\s+/g,' ').trim();
-            if (t.length > 100) return t;
-          }
-        } catch(e2){}
-        var stripped = raw.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/\s+/g,' ').trim();
-        if (stripped.length > 100) return stripped;
-      } catch(e){}
+        // Strip HTML tags to get plain text
+        var text = raw.replace(/<text[^>]*>/gi,' ').replace(/<\/text>/gi,' ').replace(/<[^>]+>/g,'')
+          .replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/\s+/g,' ').trim();
+        if (text.length > 200) { console.log('[Transcript] youtubetranscript.com: ' + text.length + ' chars'); return text; }
+        return '';
+      },
+      // Source 2: YouTube timedtext Hindi
+      async function() {
+        var r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://www.youtube.com/api/timedtext?v=' + vid + '&lang=hi&fmt=json3'));
+        var j = await r.json();
+        var raw = j.contents || '';
+        var obj = JSON.parse(raw);
+        if (!obj.events) return '';
+        var text = obj.events.filter(function(e){ return e.segs; })
+          .map(function(e){ return e.segs.map(function(s){ return s.utf8||''; }).join(''); })
+          .join(' ').replace(/\n/g,' ').replace(/\s+/g,' ').trim();
+        if (text.length > 200) { console.log('[Transcript] YT timedtext hi: ' + text.length + ' chars'); return text; }
+        return '';
+      },
+      // Source 3: YouTube timedtext English
+      async function() {
+        var r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://www.youtube.com/api/timedtext?v=' + vid + '&lang=en&fmt=json3'));
+        var j = await r.json();
+        var raw = j.contents || '';
+        var obj = JSON.parse(raw);
+        if (!obj.events) return '';
+        var text = obj.events.filter(function(e){ return e.segs; })
+          .map(function(e){ return e.segs.map(function(s){ return s.utf8||''; }).join(''); })
+          .join(' ').replace(/\n/g,' ').replace(/\s+/g,' ').trim();
+        if (text.length > 200) { console.log('[Transcript] YT timedtext en: ' + text.length + ' chars'); return text; }
+        return '';
+      },
+      // Source 4: YouTube timedtext auto-generated
+      async function() {
+        var r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://www.youtube.com/api/timedtext?v=' + vid + '&lang=hi&kind=asr&fmt=json3'));
+        var j = await r.json();
+        var raw = j.contents || '';
+        var obj = JSON.parse(raw);
+        if (!obj.events) return '';
+        var text = obj.events.filter(function(e){ return e.segs; })
+          .map(function(e){ return e.segs.map(function(s){ return s.utf8||''; }).join(''); })
+          .join(' ').replace(/\n/g,' ').replace(/\s+/g,' ').trim();
+        if (text.length > 200) { console.log('[Transcript] YT auto-asr hi: ' + text.length + ' chars'); return text; }
+        return '';
+      }
+    ];
+
+    for (var i = 0; i < sources.length; i++) {
+      try {
+        var result = await sources[i]();
+        if (result && result.length > 200) return result;
+      } catch(e) {
+        console.log('[Transcript] Source ' + i + ' failed:', e.message);
+      }
     }
+    console.log('[Transcript] All sources failed for vid:', vid);
     return '';
   }
 
@@ -1154,12 +1194,13 @@ var AiAnalyze = (function() {
 
     // STEP 1: Fetch transcript
     var raw = await fetchTranscript(vid);
-    hasTranscript = raw.length > 100;
+    hasTranscript = raw.length > 200;
 
     if (hasTranscript) {
       var cleaned = optimizeTranscriptForTokens(raw);
       transcriptChunksGlobal = chunkText(cleaned, 500);
       var chunkSummaries = [];
+      body.innerHTML = '<span class="spin">⟳</span> Transcript: ' + raw.length + ' chars → ' + transcriptChunksGlobal.length + ' chunks. MAP phase…';
 
       // MAP phase — index 2 = gemini-3.1-flash-lite
       for (var i = 0; i < transcriptChunksGlobal.length; i++) {
