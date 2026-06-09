@@ -158,16 +158,27 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
 .btn-ai-analyze:hover{opacity:.8}
 .btn-ai-analyze.loading{background:var(--muted);cursor:wait}
 .btn-ai-analyze.done{background:linear-gradient(135deg,#1a4a2e,#2d7a4a)}
-/* AI analysis panel */
-.ai-panel{display:none;margin:0 6px 10px;border:2px solid var(--videos-hl);border-radius:4px;overflow:hidden;background:var(--lighter)}
-.ai-panel.open{display:block}
-.ai-panel-hdr{background:var(--videos-hl);color:#f0e6d0;padding:8px 12px;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:.1em;display:flex;align-items:center;justify-content:space-between}
-.ai-panel-body{padding:12px;font-size:14px;line-height:1.6;color:var(--text)}
-.ai-panel-body strong{display:block;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.1em;color:var(--videos-hl);margin:10px 0 4px}
-.ai-panel-body strong:first-child{margin-top:0}
-.ai-panel-body p{margin:0 0 4px}
-.ai-tag{display:inline-block;background:rgba(26,46,74,.12);color:var(--videos-hl);border:1px solid var(--videos-hl);border-radius:2px;padding:1px 7px;font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;margin:2px 3px 2px 0}
-.ai-panel-close{background:none;border:none;color:#f0e6d0;font-size:16px;cursor:pointer;padding:0 2px;line-height:1}
+.analysis-panel{display:none;margin:0 6px 10px;border:1px solid rgba(26,58,92,.3);border-radius:3px;overflow:hidden;background:rgba(26,58,92,.06);font-size:13px}
+.analysis-panel.open{display:block}
+.ap-header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:linear-gradient(135deg,#1a3a5c,#2d6fa8);color:#fff}
+.ap-header-title{font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:.1em;flex:1}
+.ap-phase-pill{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.1em;padding:2px 7px;border-radius:8px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35);white-space:nowrap}
+.btn-ap-close{background:rgba(255,255,255,.18);border:none;color:#fff;width:22px;height:22px;border-radius:50%;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ap-content{padding:10px 12px;color:var(--text);line-height:1.6;max-height:280px;overflow-y:auto}
+.ap-content p{margin-bottom:6px}
+.ap-content strong{color:#1a3a5c}
+.ap-content ul{padding-left:16px;margin:4px 0 8px}
+.ap-content li{margin-bottom:3px}
+.ap-loading-bar{display:flex;align-items:center;gap:8px;padding:10px 12px;color:var(--muted);font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.1em}
+.ap-spinner{display:inline-block;animation:spin .8s linear infinite;font-size:16px}
+.ap-progress{font-size:11px;color:var(--muted);margin-top:2px}
+.an-sec{margin-bottom:8px}
+.an-hdr{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.12em;color:#1a3a5c;margin-bottom:3px}
+.an-body{line-height:1.6}
+.an-li{padding:2px 0 2px 14px;position:relative}
+.an-li::before{content:"\2022";position:absolute;left:0;color:#1a3a5c;font-weight:700}
+.an-num{display:inline-block;width:16px;font-weight:700;color:#1a3a5c;margin-left:-14px}
+.an-tag{display:inline-block;background:linear-gradient(135deg,#1a3a5c,#2d6fa8);color:#fff;border-radius:3px;padding:2px 9px;font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;margin:2px 3px 2px 0}
 /* Thunder floating chat */
 #thunder-btn{position:fixed;bottom:24px;right:16px;z-index:8000;width:54px;height:54px;border-radius:50%;background:var(--accent);border:3px solid var(--lighter);color:var(--lighter);font-size:24px;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;transition:transform .2s}
 #thunder-btn:hover{transform:scale(1.12)}
@@ -861,7 +872,32 @@ var UI = (function() {
       var target = e.target;
       if (target.classList.contains('btn-ai-analyze')) {
         var item = target.closest('.feed-item');
-        AiAnalyze.run(item, target);
+        var vid = item.getAttribute('data-vid');
+        var panelId = 'panel-' + vid;
+        if (!document.getElementById(panelId)) {
+          var p = document.createElement('div');
+          p.className = 'analysis-panel';
+          p.id = panelId;
+          p.setAttribute('data-vid', vid);
+          p.setAttribute('data-title', item.getAttribute('data-title') || '');
+          p.setAttribute('data-channel', item.getAttribute('data-feed') || '');
+          p.innerHTML =
+            '<div class="ap-header">' +
+              '<span class="ap-header-title">⚡ AI Analysis</span>' +
+              '<span class="ap-phase-pill" id="' + panelId + '-phase">Ready</span>' +
+              '<button class="btn-ap-close" onclick="VideoAnalysis.closePanel(\'' + panelId + '\')">✕</button>' +
+            '</div>' +
+            '<div class="ap-content" id="' + panelId + '-content">' +
+              '<div class="ap-loading-bar" id="' + panelId + '-loading" style="display:none">' +
+                '<span class="ap-spinner">⟳</span>' +
+                '<div><div>Analysing video…</div>' +
+                '<div class="ap-progress" id="' + panelId + '-progress"></div></div>' +
+              '</div>' +
+              '<div id="' + panelId + '-result"></div>' +
+            '</div>';
+          item.insertAdjacentElement('afterend', p);
+        }
+        VideoAnalysis.togglePanel(panelId, target);
         return;
       }
       if (target.classList.contains('btn-play')) {
@@ -977,7 +1013,7 @@ var App = (function() {
    Daily quota: 25 · 500 · 500
    ===================================================================== */
 var ApiSettings = (function() {
-  var KEY_STORE = 'trading_gemini_keys';
+  var KEY_STORE = 'scpdd_gemini_keys_v1';
   var QUOTA_STORE = 'trading_gemini_quota_v1';
   var _lastError = '';
 
@@ -1164,13 +1200,20 @@ var ApiSettings = (function() {
   return { save: save, hasKeys: hasKeys, getLastError: getLastError, callGeminiApi: callGeminiApi, updateStatusUI: updateStatusUI, getStatusLabel: getStatusLabel, getActiveKey: getActiveKey };
 })();
 
-/* =====================================================================
-   SANDBOX 8: AI ANALYZE — Map-Reduce + RAG (reference file pattern)
-   ===================================================================== */
-var AiAnalyze = (function() {
+/* ═══════════════════════════════════════════════════════════════════
+   [D-ANALYSIS] VIDEO ANALYSIS — Transcript + Native Video
+   ─────────────────────────────────────────────────────────────────
+   TECHNIQUE: Fetches transcript via youtubetranscript.com / YT
+   timedtext. Fails clearly if none available. Sends fileData (YT
+   URL) + transcript text to Gemini. Ported from Trading.html
+   (AiAnalyze pattern), adapted for SCPDD prompt & GChat feed.
+   ═══════════════════════════════════════════════════════════════════ */
+var VideoAnalysis = (function() {
   var transcriptChunksGlobal = [];
 
-  function optimizeTranscriptForTokens(raw) {
+  function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function optimizeTranscript(raw) {
     var text = raw;
     text = text.replace(/\[\d{2}:\d{2}:\d{2}\]/g, '');
     text = text.replace(/\(\d{2}:\d{2}\)/g, '');
@@ -1190,16 +1233,6 @@ var AiAnalyze = (function() {
     });
     if (cur.trim()) chunks.push(cur.trim());
     return chunks;
-  }
-
-  function escH(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-  function cleanAndParseGeminiJSON(text) {
-    var clean = text.replace(/```json|```/g,'').trim();
-    var s2 = clean.indexOf('{'), e2 = clean.lastIndexOf('}');
-    if (s2 !== -1 && e2 !== -1) clean = clean.substring(s2, e2+1);
-    clean = clean.replace(/,(\s*[}\]])/g, '$1');
-    return JSON.parse(clean);
   }
 
   async function fetchTranscript(vid, onProgress) {
@@ -1262,71 +1295,149 @@ var AiAnalyze = (function() {
     return '';
   }
 
-  function renderHtml(data, hasTranscript) {
-    var tt = Array.isArray(data.trading_type) ? data.trading_type : [data.trading_type||''];
-    var as = Array.isArray(data.assets) ? data.assets : [data.assets||''];
-    var kp = Array.isArray(data.key_points) ? data.key_points : [];
-    var tw = Array.isArray(data.takeaways) ? data.takeaways : [];
-    var st = Array.isArray(data.how_to_steps) ? data.how_to_steps : [];
+  function renderHtml(d, h) { return renderAnalysisHtml(d, h); }
+  function fmtRawSec(r) { return fmtRawToSections(r); }
+
+  function renderAnalysisHtml(data, hasTranscript) {
+    var typeArr   = Array.isArray(data.content_type) ? data.content_type : [data.content_type||''];
+    var themeArr  = Array.isArray(data.scpdd_themes) ? data.scpdd_themes : [data.scpdd_themes||''];
+    var insights  = Array.isArray(data.key_insights) ? data.key_insights : [];
+    var takeaways = Array.isArray(data.takeaways) ? data.takeaways : [];
+    var howto     = Array.isArray(data.how_to_apply) ? data.how_to_apply : [];
+    var skillDoms = Array.isArray(data.skill_domains) ? data.skill_domains : [];
     var badge = hasTranscript
-      ? '<div style="font-size:11px;color:var(--series-hl);font-weight:700;margin-bottom:8px;">✓ Based on actual video transcript</div>'
-      : '<div style="font-size:11px;color:var(--series-hl);font-weight:700;margin-bottom:8px;">✓ Analysed by Gemini AI</div>';
-    return badge +
-      '<strong>📋 Summary</strong><p>'+(data.summary||'')+'</p>'+
-      '<strong>📊 Trading Type</strong><p>'+tt.filter(Boolean).map(function(t){return '<span class="ai-tag">'+t+'</span>';}).join('')+'</p>'+
-      '<strong>💼 Assets</strong><p>'+as.filter(Boolean).map(function(a){return '<span class="ai-tag">'+a+'</span>';}).join('')+'</p>'+
-      '<strong>🔑 Key Points</strong>'+kp.map(function(k){return '<p>• '+k+'</p>';}).join('')+
-      '<strong>✅ Takeaways</strong>'+tw.map(function(t){return '<p>• '+t+'</p>';}).join('')+
-      '<strong>🛠 How to Implement</strong>'+st.map(function(s,i){return '<p>'+(i+1)+'. '+s+'</p>';}).join('')+
-      '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">Tap ⚡ Thunder to probe deeper.</div>';
+      ? '<div style="font-size:11px;color:#1a4a2e;font-weight:700;margin-bottom:8px;">✓ Based on actual video transcript</div>'
+      : '<div style="font-size:11px;color:#1a3a5c;font-weight:700;margin-bottom:8px;">✓ Analysed by Gemini AI</div>';
+    var out = badge;
+    out += '<div class="an-sec"><div class="an-hdr">📋 Summary</div><div class="an-body">' + (data.summary ? esc(data.summary) : '—') + '</div></div>';
+    if (typeArr.filter(Boolean).length) {
+      out += '<div class="an-sec"><div class="an-hdr">🎯 Content Type</div><div class="an-body">' +
+        typeArr.filter(Boolean).map(function(t){return '<span class="an-tag">'+esc(t)+'</span>';}).join('') +
+        '</div></div>';
+    }
+    if (themeArr.filter(Boolean).length) {
+      out += '<div class="an-sec"><div class="an-hdr">🔗 SCPDD Themes</div><div class="an-body">' +
+        themeArr.filter(Boolean).map(function(t){return '<span class="an-tag">'+esc(t)+'</span>';}).join('') +
+        '</div></div>';
+    }
+    if (insights.length) {
+      out += '<div class="an-sec"><div class="an-hdr">🔑 Key Insights</div><div class="an-body">' +
+        insights.map(function(k){return '<div class="an-li">'+esc(k)+'</div>';}).join('') +
+        '</div></div>';
+    }
+    if (takeaways.length) {
+      out += '<div class="an-sec"><div class="an-hdr">✅ Consultant Takeaways</div><div class="an-body">' +
+        takeaways.map(function(t){return '<div class="an-li">'+esc(t)+'</div>';}).join('') +
+        '</div></div>';
+    }
+    if (howto.length) {
+      out += '<div class="an-sec"><div class="an-hdr">🛠 How to Apply in Client Work</div><div class="an-body">' +
+        howto.map(function(s,i){return '<div class="an-li"><span class="an-num">'+(i+1)+'</span>'+esc(s)+'</div>';}).join('') +
+        '</div></div>';
+    }
+    if (skillDoms.filter(Boolean).length) {
+      out += '<div class="an-sec"><div class="an-hdr">🧠 Skill Domains Strengthened</div><div class="an-body">' +
+        skillDoms.filter(Boolean).map(function(t){return '<span class="an-tag">'+esc(t)+'</span>';}).join('') +
+        '</div></div>';
+    }
+    out += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(26,58,92,.2);font-size:11px;color:var(--muted);">Tap ⚡ to probe deeper in the AI chat.</div>';
+    return out;
   }
 
-  async function run(item, btn) {
-    var vid   = item.getAttribute('data-vid');
-    var title = item.getAttribute('data-title') || '';
-    var feed  = item.getAttribute('data-feed') || '';
+  function fmtRawToSections(raw) {
+    var html = '';
+    var cleaned = raw.replace(/```json|```/g,'').trim();
+    var s2 = cleaned.indexOf('{'), e2 = cleaned.lastIndexOf('}');
+    if (s2 !== -1 && e2 !== -1) cleaned = cleaned.substring(s2, e2+1);
+    if (cleaned.charAt(0) === '{' && cleaned.charAt(cleaned.length-1) === '}') {
+      try {
+        var obj = JSON.parse(cleaned);
+        var map = { summary:'📋 Summary', content_type:'🎯 Content Type', scpdd_themes:'🔗 SCPDD Themes', key_insights:'🔑 Key Insights', takeaways:'✅ Consultant Takeaways', how_to_apply:'🛠 How to Apply', skill_domains:'🧠 Skill Domains' };
+        for (var k in map) {
+          if (obj[k]) {
+            html += '<div class="an-sec"><div class="an-hdr">' + map[k] + '</div><div class="an-body">';
+            if (Array.isArray(obj[k])) {
+              obj[k].forEach(function(v){ html += '<div class="an-li">' + esc(v) + '</div>'; });
+            } else {
+              html += esc(obj[k]);
+            }
+            html += '</div></div>';
+          }
+        }
+        if (html) return html;
+      } catch(e) {}
+    }
+    var lines = raw.split('\n');
+    var section = null;
+    var body = [];
+    function flush() {
+      if (section && body.length) {
+        html += '<div class="an-sec"><div class="an-hdr">' + esc(section) + '</div><div class="an-body">';
+        body.forEach(function(l){
+          l = l.trim();
+          if (!l) return;
+          if (/^[-*•]\s/.test(l) || /^\d+[.)]\s/.test(l)) {
+            html += '<div class="an-li">' + esc(l.replace(/^[-*•]\s+/, '').replace(/^\d+[.)]\s+/, '')) + '</div>';
+          } else {
+            html += esc(l) + '<br>';
+          }
+        });
+        html += '</div></div>';
+      }
+    }
+    var sectionHeaders = ['summary','content.type','scpdd.theme','key.insight','takeaway','how.to.apply','skill.domain','overview','conclusion','analysis'];
+    lines.forEach(function(line){
+      var l = line.trim();
+      if (!l) return;
+      var isHeader = false;
+      for (var h = 0; h < sectionHeaders.length; h++) {
+        var pat = new RegExp('^\\*{0,2}\\s*' + sectionHeaders[h].replace(/\./g, '[ .:\\-]') + '\\s*[:]?\\s*\\*{0,2}$', 'i');
+        if (pat.test(l)) { isHeader = true; break; }
+      }
+      if (isHeader) { flush(); section = l.replace(/[*:]/g,'').trim(); body = []; }
+      else if (!section && /^[A-Z][A-Za-z\s]{2,40}:$/.test(l)) { flush(); section = l.replace(/:$/,'').trim(); body = []; }
+      else { body.push(line); }
+    });
+    flush();
+    return html || '<div class="an-sec"><div class="an-body">' + esc(raw).replace(/\\n/g,'<br>') + '</div></div>';
+  }
 
-    // Toggle existing panel
-    var next = item.nextElementSibling;
-    if (next && next.classList.contains('ai-panel')) { next.classList.toggle('open'); return; }
+  async function run(panelId, btnEl) {
+    var panel = document.getElementById(panelId);
+    if (!panel) return;
 
-    var panel = document.createElement('div');
-    panel.className = 'ai-panel open';
-    panel.innerHTML =
-      '<div class="ai-panel-hdr"><span>⚡ AI Analysis</span>'+
-      '<button class="ai-panel-close" onclick="this.closest(\'.ai-panel\').classList.remove(\'open\')">✕</button></div>'+
-      '<div class="ai-panel-body" id="panel-' + vid + '-result">' +
-        '<div id="panel-' + vid + '-loading" style="display:flex;flex-direction:column;align-items:center;padding:12px;gap:6px;">' +
-          '<span class="spin">⟳</span>' +
-          '<span id="panel-' + vid + '-phase" style="font-size:12px;color:var(--muted);">Starting…</span>' +
-          '<span id="panel-' + vid + '-progress" style="font-size:11px;color:var(--muted);"></span>' +
-        '</div>' +
-      '</div>';
-    item.insertAdjacentElement('afterend', panel);
-    btn.classList.add('loading'); btn.textContent = '⟳ …';
+    if (panel.classList.contains('open')) { panel.classList.remove('open'); return; }
+    panel.classList.add('open');
 
-    var resultEl  = document.getElementById('panel-' + vid + '-result');
-    var loadingEl = document.getElementById('panel-' + vid + '-loading');
-    var phaseEl   = document.getElementById('panel-' + vid + '-phase');
-    var progressEl= document.getElementById('panel-' + vid + '-progress');
+    var vid   = panel.getAttribute('data-vid')     || '';
+    var title = panel.getAttribute('data-title')   || 'SCPDD Video';
+    var feed  = panel.getAttribute('data-channel') || '';
+    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
+    var resultEl = document.getElementById(panelId + '-result');
+    var loadingEl = document.getElementById(panelId + '-loading');
+    var phaseEl = document.getElementById(panelId + '-phase');
+
+    if (btnEl) { btnEl.classList.add('loading'); btnEl.textContent = '⟳ …'; }
     if (phaseEl) phaseEl.textContent = 'Fetching…';
+    if (loadingEl) loadingEl.style.display = 'flex';
 
-    /* ── Read API key directly from localStorage (SCPDD pattern) ── */
     var keys = [];
     try {
-      var stored = JSON.parse(localStorage.getItem('trading_gemini_keys') || '{}');
-      if (Array.isArray(stored)) { if (stored[0]) keys.push(stored[0]); if (stored[1]) keys.push(stored[1]); }
-      else { if (stored.key1) keys.push(stored.key1); if (stored.key2) keys.push(stored.key2); }
+      var stored = JSON.parse(localStorage.getItem('scpdd_gemini_keys_v1') || '{}');
+      if (stored.key1) keys.push(stored.key1);
+      if (stored.key2) keys.push(stored.key2);
     } catch(e) {}
     if (!keys.length) {
       if (loadingEl) loadingEl.style.display = 'none';
       if (phaseEl) phaseEl.textContent = 'No Key';
-      btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
-      if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a4200;font-size:13px;font-weight:700;">⚠ No Gemini API key set.<br>Save keys in <b>API Keys</b> tab.</div>';
+      if (btnEl) { btnEl.textContent = '⚡ Analyse'; btnEl.classList.remove('loading'); }
+      if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a4200;font-size:13px;font-weight:700;">⚠ No Gemini API key set.<br>Tap <b>🔑 Keys</b> in the chat header.</div>';
+      try { GeminiAPI.setupKeys(); } catch(e) {}
       return;
     }
 
+    var progressEl = document.getElementById(panelId + '-progress');
     if (progressEl) progressEl.textContent = 'Fetching transcript…';
 
     var rawTranscript = await fetchTranscript(vid, function(cur, total, sym) {
@@ -1342,18 +1453,19 @@ var AiAnalyze = (function() {
     var payload = {
       contents: [{
         parts: [
-          { fileData: { mimeType: 'video/*', fileUri: 'https://www.youtube.com/watch?v=' + vid } },
+          { fileData: { mimeType: 'video/*', fileUri: ytUrl } },
           {
             text:
-              'You are an expert Indian stock market trading analyst.\n' +
+              'You are a senior SCPDD consultant at Accenture Industry X.\n' +
               'Watch this video carefully and analyse its ACTUAL content.\n\n' +
               'Return a JSON object with these exact keys:\n' +
               '"summary": 2-3 sentences on what this video specifically covers,\n' +
-              '"trading_type": array (only from: Intraday, Swing, Positional, Investment),\n' +
-              '"assets": array of instruments actually mentioned,\n' +
-              '"key_points": array of 5 specific insights from this video,\n' +
-              '"takeaways": array of 4 actionable takeaways from this video,\n' +
-              '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
+              '"content_type": array e.g. ["Keynote","Product Demo","Tech Deep-Dive","Strategy Talk","Case Study","Tutorial"],\n' +
+              '"scpdd_themes": array from: IoT Architecture, Connected Product Strategy, AI/ML for Products, Cloud & Connectivity, Digital Twin & PLM, Executive Consulting, Workshop Facilitation, Business Case & ROI, Cyber-Physical Security, Industry 4.0, Edge Computing, Smart Manufacturing,\n' +
+              '"key_insights": array of exactly 5 specific insights from this video,\n' +
+              '"takeaways": array of 4 actionable takeaways for an Accenture SCPDD consultant,\n' +
+              '"how_to_apply": array of 5 exact steps to apply these lessons in a client meeting or proposal,\n' +
+              '"skill_domains": array of SCPDD skill domains this video strengthens.\n' +
               'Pure JSON only. No markdown. No generic advice.'
           }
         ]
@@ -1361,6 +1473,7 @@ var AiAnalyze = (function() {
       generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
     };
 
+    /* gemini-2.0-flash supports native video URL understanding (as noted in Trading.html) */
     var models = ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-2.5-flash'];
     var finalResult = null;
     var usedModel = '';
@@ -1386,7 +1499,7 @@ var AiAnalyze = (function() {
 
     if (loadingEl) loadingEl.style.display = 'none';
     if (phaseEl) phaseEl.textContent = usedModel;
-    btn.textContent = '✓ Done'; btn.classList.remove('loading'); btn.classList.add('done');
+    if (btnEl) { btnEl.textContent = '✓ Done'; btnEl.classList.remove('loading'); btnEl.classList.add('done'); }
 
     if (!finalResult) {
       if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a2020;font-size:13px;">⚠ Failed. Check API key.</div>';
@@ -1401,20 +1514,29 @@ var AiAnalyze = (function() {
       var parsed = JSON.parse(clean);
       if (resultEl) resultEl.innerHTML = renderHtml(parsed, hasTranscript);
       transcriptChunksGlobal = chunkText(clean, 500);
-      Thunder.setContext(title, feed, transcriptChunksGlobal);
+      if (window.GChat && GChat._setVideoContext) {
+        GChat._setVideoContext(title + ' (' + feed + ')', clean);
+      }
     } catch(err) {
       try {
         var reparsed = JSON.parse(clean);
         if (resultEl) resultEl.innerHTML = renderHtml(reparsed, hasTranscript);
       } catch(e2) {
-        if (resultEl) resultEl.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;">' + escH(finalResult) + '</div>';
+        if (resultEl) resultEl.innerHTML = fmtRawToSections(finalResult);
       }
       transcriptChunksGlobal = [finalResult];
-      Thunder.setContext(title, feed, transcriptChunksGlobal);
+      if (window.GChat && GChat._setVideoContext) {
+        GChat._setVideoContext(title + ' (' + feed + ')', finalResult);
+      }
     }
   }
 
-  return { run: run };
+  function closePanel(panelId) {
+    var panel = document.getElementById(panelId);
+    if (panel) panel.classList.remove('open');
+  }
+
+  return { togglePanel: run, closePanel: closePanel };
 })();
 
 /* =====================================================================
