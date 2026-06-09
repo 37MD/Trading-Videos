@@ -1412,7 +1412,6 @@ var VideoAnalysis = (function() {
     var vid   = panel.getAttribute('data-vid')     || '';
     var title = panel.getAttribute('data-title')   || 'SCPDD Video';
     var feed  = panel.getAttribute('data-channel') || '';
-    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
     var resultEl = document.getElementById(panelId + '-result');
     var loadingEl = document.getElementById(panelId + '-loading');
@@ -1445,30 +1444,34 @@ var VideoAnalysis = (function() {
     });
     var hasTranscript = rawTranscript.length > 200;
 
-    if (progressEl) progressEl.textContent = hasTranscript ? '✓ Transcript' : 'No transcript — analysing video directly';
+    if (progressEl) progressEl.textContent = hasTranscript ? '✓ Transcript' : '✕ No transcript available';
+    if (!hasTranscript) {
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (phaseEl) phaseEl.textContent = 'No transcript';
+      if (btnEl) { btnEl.textContent = '⚡ Analyse'; btnEl.classList.remove('loading'); }
+      if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a2020;font-size:13px;">⚠ No transcript could be fetched for this video.<br>Transcript-based analysis requires a transcript.</div>';
+      return;
+    }
     if (phaseEl) phaseEl.textContent = 'Analysing…';
 
     var apiKey = keys[0];
+    var transcriptText = rawTranscript.substring(0, 6000);
 
     var payload = {
       contents: [{
-        parts: [
-          { fileData: { mimeType: 'video/*', fileUri: ytUrl } },
-          {
-            text:
-              'You are a senior SCPDD consultant at Accenture Industry X.\n' +
-              'Watch this video carefully and analyse its ACTUAL content.\n\n' +
-              'Return a JSON object with these exact keys:\n' +
-              '"summary": 2-3 sentences on what this video specifically covers,\n' +
-              '"content_type": array e.g. ["Keynote","Product Demo","Tech Deep-Dive","Strategy Talk","Case Study","Tutorial"],\n' +
-              '"scpdd_themes": array from: IoT Architecture, Connected Product Strategy, AI/ML for Products, Cloud & Connectivity, Digital Twin & PLM, Executive Consulting, Workshop Facilitation, Business Case & ROI, Cyber-Physical Security, Industry 4.0, Edge Computing, Smart Manufacturing,\n' +
-              '"key_insights": array of exactly 5 specific insights from this video,\n' +
-              '"takeaways": array of 4 actionable takeaways for an Accenture SCPDD consultant,\n' +
-              '"how_to_apply": array of 5 exact steps to apply these lessons in a client meeting or proposal,\n' +
-              '"skill_domains": array of SCPDD skill domains this video strengthens.\n' +
-              'Pure JSON only. No markdown. No generic advice.'
-          }
-        ]
+        parts: [{
+          text:
+            'Here is the transcript of a video:\n\n' + transcriptText + '\n\n' +
+            'Based on the above transcript, analyse the content and return a JSON object with these exact keys:\n' +
+            '"summary": 2-3 sentences on what this video specifically covers,\n' +
+            '"content_type": array e.g. ["Keynote","Product Demo","Tech Deep-Dive","Strategy Talk","Case Study","Tutorial"],\n' +
+            '"scpdd_themes": array from: IoT Architecture, Connected Product Strategy, AI/ML for Products, Cloud & Connectivity, Digital Twin & PLM, Executive Consulting, Workshop Facilitation, Business Case & ROI, Cyber-Physical Security, Industry 4.0, Edge Computing, Smart Manufacturing,\n' +
+            '"key_insights": array of exactly 5 specific insights from this video,\n' +
+            '"takeaways": array of 4 actionable takeaways for an Accenture SCPDD consultant,\n' +
+            '"how_to_apply": array of 5 exact steps to apply these lessons in a client meeting or proposal,\n' +
+            '"skill_domains": array of SCPDD skill domains this video strengthens.\n' +
+            'Pure JSON only. No markdown. No generic advice.'
+        }]
       }],
       generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
     };
