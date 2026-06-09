@@ -1201,7 +1201,7 @@ var AiAnalyze = (function() {
     return JSON.parse(clean);
   }
 
-  function fetchTranscript(vid, onProgress) {
+  async function fetchTranscript(vid, onProgress) {
     var sources = [
       async function() {
         var r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://youtubetranscript.com/?server_vid2=' + vid));
@@ -1344,12 +1344,12 @@ var AiAnalyze = (function() {
     }
 
     body.innerHTML = '<span class="spin">⟳</span> Step 3/5: Gemini analysis (2.5 Pro → 3.5 Flash → 2.5 Flash)…';
-    btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
 
     // Raw fetch cascade matching SCPDD_v3 VideoAnalysis pattern
     var apiKey = ApiSettings.getActiveKey && ApiSettings.getActiveKey();
     if (!apiKey) { apiKey = null; }
     if (!apiKey) {
+      btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
       body.innerHTML = '<span style="color:#7a2020">⚠ No API key saved. Save one in API Keys tab.</span>';
       return;
     }
@@ -1382,6 +1382,7 @@ var AiAnalyze = (function() {
       } catch(e) { console.warn('[Analysis] ' + models[m], e.message); }
     }
 
+    btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
     if (!finalResult) {
       body.innerHTML = '<span style="color:#7a2020">⚠ Gemini analysis failed. Check API key.</span>';
       return;
