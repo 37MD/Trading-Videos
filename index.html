@@ -1356,6 +1356,7 @@ var AiAnalyze = (function() {
     var models = ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-2.5-flash'];
     var finalResult = null;
     var usedModel = '';
+    var lastErr = '';
     for (var m = 0; m < models.length; m++) {
       try {
         body.innerHTML = '<span class="spin">⟳</span> Step 3/5: ' + models[m] + '…';
@@ -1377,14 +1378,15 @@ var AiAnalyze = (function() {
                      data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
           if (text) { finalResult = text; usedModel = models[m]; break; }
         } else {
-          console.warn('[Analysis] ' + models[m] + ' HTTP ' + res.status, data.error && data.error.message);
+          lastErr = models[m] + ' HTTP ' + res.status + ': ' + (data.error && data.error.message || '');
+          console.warn('[Analysis]', lastErr);
         }
-      } catch(e) { console.warn('[Analysis] ' + models[m], e.message); }
+      } catch(e) { lastErr = models[m] + ' → ' + e.message; console.warn('[Analysis]', lastErr); }
     }
 
     btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
     if (!finalResult) {
-      body.innerHTML = '<span style="color:#7a2020">⚠ Gemini analysis failed. Check API key.</span>';
+      body.innerHTML = '<div style="color:#7a2020;font-size:13px;">⚠ Gemini analysis failed</div><div style="font-size:11px;color:var(--muted);margin-top:4px;word-break:break-all;">' + escH(lastErr || 'Unknown error') + '</div>';
       return;
     }
 
