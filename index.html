@@ -1268,9 +1268,7 @@ var AiAnalyze = (function() {
     var kp = Array.isArray(data.key_points) ? data.key_points : [];
     var tw = Array.isArray(data.takeaways) ? data.takeaways : [];
     var st = Array.isArray(data.how_to_steps) ? data.how_to_steps : [];
-    var badge = hasTranscript
-      ? '<div style="font-size:11px;color:var(--series-hl);font-weight:700;margin-bottom:8px;">✓ Based on actual video transcript</div>'
-      : '<div style="font-size:11px;color:var(--series-hl);font-weight:700;margin-bottom:8px;">✓ Based on actual video transcript</div>';
+    var badge = '<div style="font-size:11px;color:var(--series-hl);font-weight:700;margin-bottom:8px;">✓ Based on actual video transcript</div>';
     return badge +
       '<strong>📋 Summary</strong><p>'+(data.summary||'')+'</p>'+
       '<strong>📊 Trading Type</strong><p>'+tt.filter(Boolean).map(function(t){return '<span class="ai-tag">'+t+'</span>';}).join('')+'</p>'+
@@ -1285,7 +1283,6 @@ var AiAnalyze = (function() {
     var vid   = item.getAttribute('data-vid');
     var title = item.getAttribute('data-title') || '';
     var feed  = item.getAttribute('data-feed') || '';
-    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
     // Toggle existing panel
     var next = item.nextElementSibling;
@@ -1335,29 +1332,33 @@ var AiAnalyze = (function() {
     });
     var hasTranscript = rawTranscript.length > 200;
 
-    if (progressEl) progressEl.textContent = hasTranscript ? '✓ Transcript' : 'No transcript — analysing video directly';
+    if (progressEl) progressEl.textContent = hasTranscript ? '✓ Transcript' : '✕ No transcript available';
+    if (!hasTranscript) {
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (phaseEl) phaseEl.textContent = 'No transcript';
+      btn.textContent = '⚡ Analyse'; btn.classList.remove('loading'); btn.classList.remove('done');
+      if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a2020;font-size:13px;">⚠ No transcript could be fetched for this video.<br>Transcript-based analysis requires a transcript.</div>';
+      return;
+    }
     if (phaseEl) phaseEl.textContent = 'Analysing…';
 
     var apiKey = keys[0];
+    var transcriptText = rawTranscript.substring(0, 6000);
 
     var payload = {
       contents: [{
-        parts: [
-          { fileData: { mimeType: 'video/*', fileUri: ytUrl } },
-          {
-            text:
-              'You are an expert Indian stock market trading analyst.\n' +
-              'Watch this video carefully and analyse its ACTUAL content.\n\n' +
-              'Return a JSON object with these exact keys:\n' +
-              '"summary": 2-3 sentences on what this video specifically covers,\n' +
-              '"trading_type": array (only from: Intraday, Swing, Positional, Investment),\n' +
-              '"assets": array of instruments actually mentioned,\n' +
-              '"key_points": array of 5 specific insights from this video,\n' +
-              '"takeaways": array of 4 actionable takeaways from this video,\n' +
-              '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
-              'Pure JSON only. No markdown. No generic advice.'
-          }
-        ]
+        parts: [{
+          text:
+            'Here is the transcript of a trading video:\n\n' + transcriptText + '\n\n' +
+            'Based on the above transcript, analyse the content and return a JSON object with these exact keys:\n' +
+            '"summary": 2-3 sentences on what this video specifically covers,\n' +
+            '"trading_type": array (only from: Intraday, Swing, Positional, Investment),\n' +
+            '"assets": array of instruments actually mentioned,\n' +
+            '"key_points": array of 5 specific insights from this video,\n' +
+            '"takeaways": array of 4 actionable takeaways from this video,\n' +
+            '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
+            'Pure JSON only. No markdown. No generic advice.'
+        }]
       }],
       generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
     };
