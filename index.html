@@ -510,7 +510,50 @@ var Feed = (function() {
       });
   }
 
-  return { getVid: getVid, thumbUrl: thumbUrl, embedUrl: embedUrl, fmtDate: fmtDate, esc: esc, fetchFeed: fetchFeed, BATCH: BATCH };
+  /* ── Attempt 6: YouTube search via codetabs + oEmbed (backup when RSS broken) ── */
+  function searchYouTube(channelName, onSuccess, onError) {
+    var query = encodeURIComponent(channelName + ' stock market');
+    fetch('https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://www.youtube.com/results?search_query=' + query))
+      .then(function(r) {
+        if (!r.ok) throw new Error('search page ' + r.status);
+        return r.text();
+      })
+      .then(function(html) {
+        var videoIds = [], seen = {};
+        var re = /"videoId":"([a-zA-Z0-9_-]{11})"/g, m;
+        while ((m = re.exec(html)) !== null) {
+          var vid = m[1];
+          if (!seen[vid]) { seen[vid] = true; videoIds.push(vid); }
+          if (videoIds.length >= 15) break;
+        }
+        if (videoIds.length === 0) { onError('No videos found on YouTube'); return; }
+        /* fetch oEmbed for each video to get title */
+        var fetches = videoIds.map(function(vid) {
+          return fetch('https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=' + vid + '&format=json')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+              return {
+                link: 'https://www.youtube.com/watch?v=' + vid,
+                title: d.title || 'Untitled',
+                pubDate: '',
+                thumbnail: d.thumbnail_url || thumbUrl(vid)
+              };
+            })
+            .catch(function() {
+              return {
+                link: 'https://www.youtube.com/watch?v=' + vid,
+                title: 'Untitled',
+                pubDate: '',
+                thumbnail: thumbUrl(vid)
+              };
+            });
+        });
+        Promise.all(fetches).then(function(items) { onSuccess(items); });
+      })
+      .catch(function(e) { onError(e.message || 'search failed'); });
+  }
+
+  return { getVid: getVid, thumbUrl: thumbUrl, embedUrl: embedUrl, fmtDate: fmtDate, esc: esc, fetchFeed: fetchFeed, searchYouTube: searchYouTube, BATCH: BATCH };
 })();
 
 /* =====================================================================
@@ -808,7 +851,12 @@ var UI = (function() {
     Feed.fetchFeed(
       Data.feedUrl(ch),
       function(items) { renderItems(grid, items, 0, Feed.BATCH, ch.name); },
-      function(err)   { grid.innerHTML = '<div class="error-row">⚠ ' + Feed.esc(err) + ' — try again later</div>'; }
+      function(err)   {
+        Feed.searchYouTube(ch.name,
+          function(items) { renderItems(grid, items, 0, Feed.BATCH, ch.name); },
+          function(err2)  { grid.innerHTML = '<div class="error-row">⚠ ' + Feed.esc(err2) + ' — try again later</div>'; }
+        );
+      }
     );
   }
 
