@@ -1200,6 +1200,114 @@ var ApiSettings = (function() {
   return { save: save, hasKeys: hasKeys, getLastError: getLastError, callGeminiApi: callGeminiApi, updateStatusUI: updateStatusUI, getStatusLabel: getStatusLabel, getActiveKey: getActiveKey };
 })();
 
+var GeminiAPI = ApiSettings;
+
+function escH(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function renderAnalysisHtml(data, hasTranscript) {
+  var typeArr   = Array.isArray(data.content_type) ? data.content_type : [data.content_type||''];
+  var themeArr  = Array.isArray(data.scpdd_themes) ? data.scpdd_themes : [data.scpdd_themes||''];
+  var insights  = Array.isArray(data.key_insights) ? data.key_insights : [];
+  var takeaways = Array.isArray(data.takeaways) ? data.takeaways : [];
+  var howto     = Array.isArray(data.how_to_apply) ? data.how_to_apply : [];
+  var skillDoms = Array.isArray(data.skill_domains) ? data.skill_domains : [];
+  var badge = hasTranscript
+    ? '<div style="font-size:11px;color:#1a4a2e;font-weight:700;margin-bottom:8px;">✓ Based on actual video transcript</div>'
+    : '<div style="font-size:11px;color:#1a3a5c;font-weight:700;margin-bottom:8px;">✓ Analysed by Gemini AI</div>';
+  var out = badge;
+  out += '<div class="an-sec"><div class="an-hdr">📋 Summary</div><div class="an-body">' + (data.summary ? escH(data.summary) : '—') + '</div></div>';
+  if (typeArr.filter(Boolean).length) {
+    out += '<div class="an-sec"><div class="an-hdr">🎯 Content Type</div><div class="an-body">' +
+      typeArr.filter(Boolean).map(function(t){return '<span class="an-tag">'+escH(t)+'</span>';}).join('') +
+      '</div></div>';
+  }
+  if (themeArr.filter(Boolean).length) {
+    out += '<div class="an-sec"><div class="an-hdr">🔗 SCPDD Themes</div><div class="an-body">' +
+      themeArr.filter(Boolean).map(function(t){return '<span class="an-tag">'+escH(t)+'</span>';}).join('') +
+      '</div></div>';
+  }
+  if (insights.length) {
+    out += '<div class="an-sec"><div class="an-hdr">🔑 Key Insights</div><div class="an-body">' +
+      insights.map(function(k){return '<div class="an-li">'+escH(k)+'</div>';}).join('') +
+      '</div></div>';
+  }
+  if (takeaways.length) {
+    out += '<div class="an-sec"><div class="an-hdr">✅ Consultant Takeaways</div><div class="an-body">' +
+      takeaways.map(function(t){return '<div class="an-li">'+escH(t)+'</div>';}).join('') +
+      '</div></div>';
+  }
+  if (howto.length) {
+    out += '<div class="an-sec"><div class="an-hdr">🛠 How to Apply in Client Work</div><div class="an-body">' +
+      howto.map(function(s,i){return '<div class="an-li"><span class="an-num">'+(i+1)+'</span>'+escH(s)+'</div>';}).join('') +
+      '</div></div>';
+  }
+  if (skillDoms.filter(Boolean).length) {
+    out += '<div class="an-sec"><div class="an-hdr">🧠 Skill Domains Strengthened</div><div class="an-body">' +
+      skillDoms.filter(Boolean).map(function(t){return '<span class="an-tag">'+escH(t)+'</span>';}).join('') +
+      '</div></div>';
+  }
+  out += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(26,58,92,.2);font-size:11px;color:var(--muted);">Tap ⚡ to probe deeper in the AI chat.</div>';
+  return out;
+}
+
+function fmtRawToSections(raw) {
+  var html = '';
+  var cleaned = raw.replace(/```json|```/g,'').trim();
+  var s2 = cleaned.indexOf('{'), e2 = cleaned.lastIndexOf('}');
+  if (s2 !== -1 && e2 !== -1) cleaned = cleaned.substring(s2, e2+1);
+  if (cleaned.charAt(0) === '{' && cleaned.charAt(cleaned.length-1) === '}') {
+    try {
+      var obj = JSON.parse(cleaned);
+      var map = { summary:'📋 Summary', content_type:'🎯 Content Type', scpdd_themes:'🔗 SCPDD Themes', key_insights:'🔑 Key Insights', takeaways:'✅ Consultant Takeaways', how_to_apply:'🛠 How to Apply', skill_domains:'🧠 Skill Domains' };
+      for (var k in map) {
+        if (obj[k]) {
+          html += '<div class="an-sec"><div class="an-hdr">' + map[k] + '</div><div class="an-body">';
+          if (Array.isArray(obj[k])) {
+            obj[k].forEach(function(v){ html += '<div class="an-li">' + escH(v) + '</div>'; });
+          } else {
+            html += escH(obj[k]);
+          }
+          html += '</div></div>';
+        }
+      }
+      if (html) return html;
+    } catch(e) {}
+  }
+  var lines = raw.split('\n');
+  var section = null;
+  var body = [];
+  function flush() {
+    if (section && body.length) {
+      html += '<div class="an-sec"><div class="an-hdr">' + escH(section) + '</div><div class="an-body">';
+      body.forEach(function(l){
+        l = l.trim();
+        if (!l) return;
+        if (/^[-*•]\s/.test(l) || /^\d+[.)]\s/.test(l)) {
+          html += '<div class="an-li">' + escH(l.replace(/^[-*•]\s+/, '').replace(/^\d+[.)]\s+/, '')) + '</div>';
+        } else {
+          html += escH(l) + '<br>';
+        }
+      });
+      html += '</div></div>';
+    }
+  }
+  var sectionHeaders = ['summary','content.type','scpdd.theme','key.insight','takeaway','how.to.apply','skill.domain','overview','conclusion','analysis'];
+  lines.forEach(function(line){
+    var l = line.trim();
+    if (!l) return;
+    var isHeader = false;
+    for (var h = 0; h < sectionHeaders.length; h++) {
+      var pat = new RegExp('^\\*{0,2}\\s*' + sectionHeaders[h].replace(/\./g, '[ .:\\-]') + '\\s*[:]?\\s*\\*{0,2}$', 'i');
+      if (pat.test(l)) { isHeader = true; break; }
+    }
+    if (isHeader) { flush(); section = l.replace(/[*:]/g,'').trim(); body = []; }
+    else if (!section && /^[A-Z][A-Za-z\s]{2,40}:$/.test(l)) { flush(); section = l.replace(/:$/,'').trim(); body = []; }
+    else { body.push(line); }
+  });
+  flush();
+  return html || '<div class="an-sec"><div class="an-body">' + escH(raw).replace(/\\n/g,'<br>') + '</div></div>';
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    [D-ANALYSIS] VIDEO ANALYSIS — Transcript + Native Video
    ─────────────────────────────────────────────────────────────────
@@ -1298,110 +1406,6 @@ var VideoAnalysis = (function() {
   function renderHtml(d, h) { return renderAnalysisHtml(d, h); }
   function fmtRawSec(r) { return fmtRawToSections(r); }
 
-  function renderAnalysisHtml(data, hasTranscript) {
-    var typeArr   = Array.isArray(data.content_type) ? data.content_type : [data.content_type||''];
-    var themeArr  = Array.isArray(data.scpdd_themes) ? data.scpdd_themes : [data.scpdd_themes||''];
-    var insights  = Array.isArray(data.key_insights) ? data.key_insights : [];
-    var takeaways = Array.isArray(data.takeaways) ? data.takeaways : [];
-    var howto     = Array.isArray(data.how_to_apply) ? data.how_to_apply : [];
-    var skillDoms = Array.isArray(data.skill_domains) ? data.skill_domains : [];
-    var badge = hasTranscript
-      ? '<div style="font-size:11px;color:#1a4a2e;font-weight:700;margin-bottom:8px;">✓ Based on actual video transcript</div>'
-      : '<div style="font-size:11px;color:#1a3a5c;font-weight:700;margin-bottom:8px;">✓ Analysed by Gemini AI</div>';
-    var out = badge;
-    out += '<div class="an-sec"><div class="an-hdr">📋 Summary</div><div class="an-body">' + (data.summary ? esc(data.summary) : '—') + '</div></div>';
-    if (typeArr.filter(Boolean).length) {
-      out += '<div class="an-sec"><div class="an-hdr">🎯 Content Type</div><div class="an-body">' +
-        typeArr.filter(Boolean).map(function(t){return '<span class="an-tag">'+esc(t)+'</span>';}).join('') +
-        '</div></div>';
-    }
-    if (themeArr.filter(Boolean).length) {
-      out += '<div class="an-sec"><div class="an-hdr">🔗 SCPDD Themes</div><div class="an-body">' +
-        themeArr.filter(Boolean).map(function(t){return '<span class="an-tag">'+esc(t)+'</span>';}).join('') +
-        '</div></div>';
-    }
-    if (insights.length) {
-      out += '<div class="an-sec"><div class="an-hdr">🔑 Key Insights</div><div class="an-body">' +
-        insights.map(function(k){return '<div class="an-li">'+esc(k)+'</div>';}).join('') +
-        '</div></div>';
-    }
-    if (takeaways.length) {
-      out += '<div class="an-sec"><div class="an-hdr">✅ Consultant Takeaways</div><div class="an-body">' +
-        takeaways.map(function(t){return '<div class="an-li">'+esc(t)+'</div>';}).join('') +
-        '</div></div>';
-    }
-    if (howto.length) {
-      out += '<div class="an-sec"><div class="an-hdr">🛠 How to Apply in Client Work</div><div class="an-body">' +
-        howto.map(function(s,i){return '<div class="an-li"><span class="an-num">'+(i+1)+'</span>'+esc(s)+'</div>';}).join('') +
-        '</div></div>';
-    }
-    if (skillDoms.filter(Boolean).length) {
-      out += '<div class="an-sec"><div class="an-hdr">🧠 Skill Domains Strengthened</div><div class="an-body">' +
-        skillDoms.filter(Boolean).map(function(t){return '<span class="an-tag">'+esc(t)+'</span>';}).join('') +
-        '</div></div>';
-    }
-    out += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(26,58,92,.2);font-size:11px;color:var(--muted);">Tap ⚡ to probe deeper in the AI chat.</div>';
-    return out;
-  }
-
-  function fmtRawToSections(raw) {
-    var html = '';
-    var cleaned = raw.replace(/```json|```/g,'').trim();
-    var s2 = cleaned.indexOf('{'), e2 = cleaned.lastIndexOf('}');
-    if (s2 !== -1 && e2 !== -1) cleaned = cleaned.substring(s2, e2+1);
-    if (cleaned.charAt(0) === '{' && cleaned.charAt(cleaned.length-1) === '}') {
-      try {
-        var obj = JSON.parse(cleaned);
-        var map = { summary:'📋 Summary', content_type:'🎯 Content Type', scpdd_themes:'🔗 SCPDD Themes', key_insights:'🔑 Key Insights', takeaways:'✅ Consultant Takeaways', how_to_apply:'🛠 How to Apply', skill_domains:'🧠 Skill Domains' };
-        for (var k in map) {
-          if (obj[k]) {
-            html += '<div class="an-sec"><div class="an-hdr">' + map[k] + '</div><div class="an-body">';
-            if (Array.isArray(obj[k])) {
-              obj[k].forEach(function(v){ html += '<div class="an-li">' + esc(v) + '</div>'; });
-            } else {
-              html += esc(obj[k]);
-            }
-            html += '</div></div>';
-          }
-        }
-        if (html) return html;
-      } catch(e) {}
-    }
-    var lines = raw.split('\n');
-    var section = null;
-    var body = [];
-    function flush() {
-      if (section && body.length) {
-        html += '<div class="an-sec"><div class="an-hdr">' + esc(section) + '</div><div class="an-body">';
-        body.forEach(function(l){
-          l = l.trim();
-          if (!l) return;
-          if (/^[-*•]\s/.test(l) || /^\d+[.)]\s/.test(l)) {
-            html += '<div class="an-li">' + esc(l.replace(/^[-*•]\s+/, '').replace(/^\d+[.)]\s+/, '')) + '</div>';
-          } else {
-            html += esc(l) + '<br>';
-          }
-        });
-        html += '</div></div>';
-      }
-    }
-    var sectionHeaders = ['summary','content.type','scpdd.theme','key.insight','takeaway','how.to.apply','skill.domain','overview','conclusion','analysis'];
-    lines.forEach(function(line){
-      var l = line.trim();
-      if (!l) return;
-      var isHeader = false;
-      for (var h = 0; h < sectionHeaders.length; h++) {
-        var pat = new RegExp('^\\*{0,2}\\s*' + sectionHeaders[h].replace(/\./g, '[ .:\\-]') + '\\s*[:]?\\s*\\*{0,2}$', 'i');
-        if (pat.test(l)) { isHeader = true; break; }
-      }
-      if (isHeader) { flush(); section = l.replace(/[*:]/g,'').trim(); body = []; }
-      else if (!section && /^[A-Z][A-Za-z\s]{2,40}:$/.test(l)) { flush(); section = l.replace(/:$/,'').trim(); body = []; }
-      else { body.push(line); }
-    });
-    flush();
-    return html || '<div class="an-sec"><div class="an-body">' + esc(raw).replace(/\\n/g,'<br>') + '</div></div>';
-  }
-
   async function run(panelId, btnEl) {
     var panel = document.getElementById(panelId);
     if (!panel) return;
@@ -1412,6 +1416,7 @@ var VideoAnalysis = (function() {
     var vid   = panel.getAttribute('data-vid')     || '';
     var title = panel.getAttribute('data-title')   || 'SCPDD Video';
     var feed  = panel.getAttribute('data-channel') || '';
+    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
     var resultEl = document.getElementById(panelId + '-result');
     var loadingEl = document.getElementById(panelId + '-loading');
@@ -1432,7 +1437,7 @@ var VideoAnalysis = (function() {
       if (phaseEl) phaseEl.textContent = 'No Key';
       if (btnEl) { btnEl.textContent = '⚡ Analyse'; btnEl.classList.remove('loading'); }
       if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a4200;font-size:13px;font-weight:700;">⚠ No Gemini API key set.<br>Tap <b>🔑 Keys</b> in the chat header.</div>';
-      try { GeminiAPI.setupKeys(); } catch(e) {}
+      GeminiAPI.setupKeys();
       return;
     }
 
@@ -1444,7 +1449,8 @@ var VideoAnalysis = (function() {
     });
     var hasTranscript = rawTranscript.length > 200;
 
-    if (progressEl) progressEl.textContent = hasTranscript ? '✓ Transcript' : '✕ No transcript available';
+    if (progressEl) progressEl.textContent = hasTranscript ? '✓ Transcript' : 'No transcript — analysing video directly';
+    if (phaseEl) phaseEl.textContent = 'Analysing…';
     if (!hasTranscript) {
       if (loadingEl) loadingEl.style.display = 'none';
       if (phaseEl) phaseEl.textContent = 'No transcript';
@@ -1452,7 +1458,6 @@ var VideoAnalysis = (function() {
       if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a2020;font-size:13px;">⚠ No transcript could be fetched for this video.<br>Transcript-based analysis requires a transcript.</div>';
       return;
     }
-    if (phaseEl) phaseEl.textContent = 'Analysing…';
 
     var apiKey = keys[0];
     var transcriptText = rawTranscript.substring(0, 6000);
