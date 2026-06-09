@@ -157,6 +157,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
 .btn-ai-analyze{background:var(--videos-hl);color:#f0e6d0;border:none;border-radius:3px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;padding:4px 8px;cursor:pointer;white-space:nowrap;transition:opacity .15s}
 .btn-ai-analyze:hover{opacity:.8}
 .btn-ai-analyze.loading{background:var(--muted);cursor:wait}
+.btn-ai-analyze.done{background:linear-gradient(135deg,#1a4a2e,#2d7a4a)}
 /* AI analysis panel */
 .ai-panel{display:none;margin:0 6px 10px;border:2px solid var(--videos-hl);border-radius:4px;overflow:hidden;background:var(--lighter)}
 .ai-panel.open{display:block}
@@ -1209,7 +1210,7 @@ var AiAnalyze = (function() {
         var raw = j.contents || '';
         var text = raw.replace(/<text[^>]*>/gi,' ').replace(/<\/text>/gi,' ').replace(/<[^>]+>/g,'')
           .replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/\s+/g,' ').trim();
-        if (text.length > 200) return text;
+        if (text.length > 200) { console.log('[Transcript] youtubetranscript.com: ' + text.length + ' chars'); return text; }
         return '';
       },
       async function() {
@@ -1221,7 +1222,7 @@ var AiAnalyze = (function() {
         var text = obj.events.filter(function(e){ return e.segs; })
           .map(function(e){ return e.segs.map(function(s){ return s.utf8||''; }).join(''); })
           .join(' ').replace(/\n/g,' ').replace(/\s+/g,' ').trim();
-        if (text.length > 200) return text;
+        if (text.length > 200) { console.log('[Transcript] YT timedtext hi: ' + text.length + ' chars'); return text; }
         return '';
       },
       async function() {
@@ -1233,7 +1234,7 @@ var AiAnalyze = (function() {
         var text = obj.events.filter(function(e){ return e.segs; })
           .map(function(e){ return e.segs.map(function(s){ return s.utf8||''; }).join(''); })
           .join(' ').replace(/\n/g,' ').replace(/\s+/g,' ').trim();
-        if (text.length > 200) return text;
+        if (text.length > 200) { console.log('[Transcript] YT timedtext en: ' + text.length + ' chars'); return text; }
         return '';
       },
       async function() {
@@ -1245,7 +1246,7 @@ var AiAnalyze = (function() {
         var text = obj.events.filter(function(e){ return e.segs; })
           .map(function(e){ return e.segs.map(function(s){ return s.utf8||''; }).join(''); })
           .join(' ').replace(/\n/g,' ').replace(/\s+/g,' ').trim();
-        if (text.length > 200) return text;
+        if (text.length > 200) { console.log('[Transcript] YT auto-asr hi: ' + text.length + ' chars'); return text; }
         return '';
       }
     ];
@@ -1281,11 +1282,10 @@ var AiAnalyze = (function() {
   }
 
   async function run(item, btn) {
-    if (!ApiSettings.hasKeys()) { alert('Save your Gemini API key in the API Keys tab first.'); return; }
-
     var vid   = item.getAttribute('data-vid');
     var title = item.getAttribute('data-title') || '';
     var feed  = item.getAttribute('data-feed') || '';
+    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
     // Toggle existing panel
     var next = item.nextElementSibling;
@@ -1296,80 +1296,82 @@ var AiAnalyze = (function() {
     panel.innerHTML =
       '<div class="ai-panel-hdr"><span>⚡ AI Analysis</span>'+
       '<button class="ai-panel-close" onclick="this.closest(\'.ai-panel\').classList.remove(\'open\')">✕</button></div>'+
-      '<div class="ai-panel-body"><span class="spin">⟳</span> Step 1/5: Fetching transcript (4 sources)…</div>';
+      '<div class="ai-panel-body" id="panel-' + vid + '-result">' +
+        '<div id="panel-' + vid + '-loading" style="display:flex;flex-direction:column;align-items:center;padding:12px;gap:6px;">' +
+          '<span class="spin">⟳</span>' +
+          '<span id="panel-' + vid + '-phase" style="font-size:12px;color:var(--muted);">Starting…</span>' +
+          '<span id="panel-' + vid + '-progress" style="font-size:11px;color:var(--muted);"></span>' +
+        '</div>' +
+      '</div>';
     item.insertAdjacentElement('afterend', panel);
     btn.classList.add('loading'); btn.textContent = '⟳ …';
 
-    var body = panel.querySelector('.ai-panel-body');
-    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
+    var resultEl  = document.getElementById('panel-' + vid + '-result');
+    var loadingEl = document.getElementById('panel-' + vid + '-loading');
+    var phaseEl   = document.getElementById('panel-' + vid + '-phase');
+    var progressEl= document.getElementById('panel-' + vid + '-progress');
 
-    // Step 1: Fetch transcript (try 4 sources)
-    body.innerHTML = '<span class="spin">⟳</span> Step 1/5: Fetching transcript…';
-    var rawTranscript = await fetchTranscript(vid, function(cur, total, sym) {
-      body.innerHTML = '<span class="spin">⟳</span> Step 1/5: Transcript ' + (cur+1) + '/' + total + ' ' + sym;
-    });
-    var hasTranscript = rawTranscript && rawTranscript.length > 200;
+    if (phaseEl) phaseEl.textContent = 'Fetching…';
 
-    if (hasTranscript) {
-      body.innerHTML = '<span class="spin">⟳</span> Step 2/5: ✓ Transcript ' + rawTranscript.length + ' chars';
-    } else {
-      body.innerHTML = '<span class="spin">⟳</span> Step 2/5: ✕ No transcript';
-    }
-
-    // Step 2: Build Gemini payload (fileData + transcript text — SCPDD pattern)
-    var promptText = 'You are an expert Indian stock market trading analyst.\n';
-    if (hasTranscript) {
-      var cleanTranscript = optimizeTranscriptForTokens(rawTranscript);
-      promptText +=
-        'Analyse this video transcript and extract the actual trading content.\n\n' +
-        'TRANSCRIPT:\n' + cleanTranscript.substring(0, 6000) + '\n\n' +
-        'Return ONLY a JSON object with these exact keys:\n' +
-        '"summary": 2-3 sentences summarising the video content,\n' +
-        '"trading_type": array (only from: Intraday, Swing, Positional, Investment),\n' +
-        '"assets": array of instruments actually mentioned (e.g. Nifty, Bank Nifty, stocks, etc.),\n' +
-        '"key_points": array of 5 specific insights mentioned in the transcript,\n' +
-        '"takeaways": array of 4 actionable takeaways from the video,\n' +
-        '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
-        'Pure JSON only. No markdown formatting. No code blocks. No extra text.';
-    } else {
-      promptText +=
-        'Analyse the video content and return a JSON object with these exact keys:\n' +
-        '"summary": "Unable to analyse — no transcript available",\n' +
-        '"trading_type": [],\n' +
-        '"assets": [],\n' +
-        '"key_points": ["No transcript available for analysis"],\n' +
-        '"takeaways": ["Check back later or try a different video"],\n' +
-        '"how_to_steps": []\n' +
-        'Pure JSON only. No markdown. No extra text.';
-    }
-
-    body.innerHTML = '<span class="spin">⟳</span> Step 3/5: Gemini analysis (2.5 Pro → 3.5 Flash → 2.5 Flash)…';
-
-    // Raw fetch cascade matching SCPDD_v3 VideoAnalysis pattern
-    var apiKey = ApiSettings.getActiveKey && ApiSettings.getActiveKey();
-    if (!apiKey) { apiKey = null; }
-    if (!apiKey) {
+    /* ── Read API key directly from localStorage (SCPDD pattern) ── */
+    var keys = [];
+    try {
+      var stored = JSON.parse(localStorage.getItem('trading_gemini_keys') || '{}');
+      if (Array.isArray(stored)) { if (stored[0]) keys.push(stored[0]); if (stored[1]) keys.push(stored[1]); }
+      else { if (stored.key1) keys.push(stored.key1); if (stored.key2) keys.push(stored.key2); }
+    } catch(e) {}
+    if (!keys.length) {
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (phaseEl) phaseEl.textContent = 'No Key';
       btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
-      body.innerHTML = '<span style="color:#7a2020">⚠ No API key saved. Save one in API Keys tab.</span>';
+      if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a4200;font-size:13px;font-weight:700;">⚠ No Gemini API key set.<br>Save keys in <b>API Keys</b> tab.</div>';
       return;
     }
+
+    if (progressEl) progressEl.textContent = 'Fetching transcript…';
+
+    var rawTranscript = await fetchTranscript(vid, function(cur, total, sym) {
+      if (progressEl && sym) progressEl.textContent = 'Transcript ' + (cur+1) + '/' + total + ' ' + sym;
+    });
+    var hasTranscript = rawTranscript.length > 200;
+
+    if (progressEl) progressEl.textContent = hasTranscript ? '✓ Transcript' : 'No transcript — analysing video directly';
+    if (phaseEl) phaseEl.textContent = 'Analysing…';
+
+    var apiKey = keys[0];
+
+    var payload = {
+      contents: [{
+        parts: [
+          { fileData: { mimeType: 'video/*', fileUri: ytUrl } },
+          {
+            text:
+              'You are an expert Indian stock market trading analyst.\n' +
+              'Watch this video carefully and analyse its ACTUAL content.\n\n' +
+              'Return a JSON object with these exact keys:\n' +
+              '"summary": 2-3 sentences on what this video specifically covers,\n' +
+              '"trading_type": array (only from: Intraday, Swing, Positional, Investment),\n' +
+              '"assets": array of instruments actually mentioned,\n' +
+              '"key_points": array of 5 specific insights from this video,\n' +
+              '"takeaways": array of 4 actionable takeaways from this video,\n' +
+              '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
+              'Pure JSON only. No markdown. No generic advice.'
+          }
+        ]
+      }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+    };
+
     var models = ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-2.5-flash'];
     var finalResult = null;
     var usedModel = '';
-    var lastErr = '';
+
     for (var m = 0; m < models.length; m++) {
       try {
-        body.innerHTML = '<span class="spin">⟳</span> Step 3/5: ' + models[m] + '…';
+        if (progressEl) progressEl.textContent = 'Gemini ' + models[m] + '…';
         var res = await fetch(
           'https://generativelanguage.googleapis.com/v1beta/models/' + models[m] + ':generateContent?key=' + apiKey,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: promptText }] }],
-              generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
-            })
-          }
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
         );
         var data = await res.json();
         if (res.ok) {
@@ -1378,30 +1380,38 @@ var AiAnalyze = (function() {
                      data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
           if (text) { finalResult = text; usedModel = models[m]; break; }
         } else {
-          lastErr = models[m] + ' HTTP ' + res.status + ': ' + (data.error && data.error.message || '');
-          console.warn('[Analysis]', lastErr);
+          console.warn('[Video] ' + models[m] + ' HTTP ' + res.status, data.error && data.error.message);
         }
-      } catch(e) { lastErr = models[m] + ' → ' + e.message; console.warn('[Analysis]', lastErr); }
+      } catch(e) { console.warn('[Video] ' + models[m], e.message); }
     }
 
-    btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (phaseEl) phaseEl.textContent = usedModel;
+    btn.textContent = '✓ Done'; btn.classList.remove('loading'); btn.classList.add('done');
+
     if (!finalResult) {
-      body.innerHTML = '<div style="color:#7a2020;font-size:13px;">⚠ Gemini analysis failed</div><div style="font-size:11px;color:var(--muted);margin-top:4px;word-break:break-all;">' + escH(lastErr || 'Unknown error') + '</div>';
+      if (resultEl) resultEl.innerHTML = '<div style="padding:10px;color:#7a2020;font-size:13px;">⚠ Failed. Check API key.</div>';
       return;
     }
 
-    // Step 3: Parse JSON from response
-    body.innerHTML = '<span class="spin">⟳</span> Step 4/5: Parsing JSON…';
     try {
-      var parsed = cleanAndParseGeminiJSON(finalResult);
-      body.innerHTML = renderHtml(parsed, hasTranscript);
+      var clean = finalResult.replace(/```json|```/g,'').trim();
+      var s2 = clean.indexOf('{'), e2 = clean.lastIndexOf('}');
+      if (s2 !== -1 && e2 !== -1) clean = clean.substring(s2, e2+1);
+      clean = clean.replace(/,(\s*[}\]])/g, '$1');
+      var parsed = JSON.parse(clean);
+      if (resultEl) resultEl.innerHTML = renderHtml(parsed, hasTranscript);
       transcriptChunksGlobal = rawTranscript
         ? chunkText(optimizeTranscriptForTokens(rawTranscript), 500)
-        : chunkText(finalResult, 500);
-      body.innerHTML += '<div style="font-size:10px;color:var(--muted);margin-top:4px;">Step 5/5: ✓ Model ' + usedModel + ' · Loaded into Thunder ⚡</div>';
+        : chunkText(clean, 500);
       Thunder.setContext(title, feed, transcriptChunksGlobal);
     } catch(err) {
-      body.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;">' + escH(finalResult) + '</div>';
+      try {
+        var reparsed = JSON.parse(clean);
+        if (resultEl) resultEl.innerHTML = renderHtml(reparsed, hasTranscript);
+      } catch(e2) {
+        if (resultEl) resultEl.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;">' + escH(finalResult) + '</div>';
+      }
       transcriptChunksGlobal = rawTranscript
         ? chunkText(optimizeTranscriptForTokens(rawTranscript), 500)
         : [finalResult];
