@@ -149,6 +149,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
 .api-status.err{background:rgba(122,32,32,.12);color:#7a2020;display:block}
 .api-model-info{font-size:12px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px solid var(--border);line-height:1.6}
 .api-model-info b{color:var(--text)}
+#api-model-status{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.1em;padding:3px 10px;border-radius:2px;margin-left:8px;display:inline-block}
+#api-model-status.ok{background:rgba(46,204,113,.18);color:#1a6b3a;border:1px solid #2ecc71}
+#api-model-status.warn{background:rgba(230,126,34,.15);color:#7a4200;border:1px solid #e67e22}
+#api-model-status.err{background:rgba(231,76,60,.15);color:#7a1a1a;border:1px solid #e74c3c}
 /* AI Analyse button */
 .btn-ai-analyze{background:var(--videos-hl);color:#f0e6d0;border:none;border-radius:3px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;padding:4px 8px;cursor:pointer;white-space:nowrap;transition:opacity .15s}
 .btn-ai-analyze:hover{opacity:.8}
@@ -274,8 +278,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
         <input type="password" class="api-input" id="apiKey2" placeholder="Second key for failover…" autocomplete="off">
         <button class="api-save-btn" onclick="ApiSettings.save()">💾 Save Keys</button>
         <div id="api-status" class="api-status"></div>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:700;">Model <span id="api-model-status" class="ok">Ready</span></div>
         <div class="api-model-info">
-          <b>Model cascade:</b> gemini-2.5-pro → gemini-3.5-flash → gemini-3.1-flash-lite → gemini-3-flash → gemini-2.5-flash<br>
+          <b>Model cascade:</b> gemini-2.5-pro → gemini-3.5-flash → gemini-2.5-flash<br>
+          <b>Daily quota:</b> 2.5 Pro = 25 req · 3.5 Flash = 500 · 2.5 Flash = 500<br>
+          <b>Tokens:</b> 2048 output · Temperature 0.2<br>
           Keys saved in localStorage on your device only. Get a free key at <b>aistudio.google.com</b>
         </div>
       </div>
@@ -963,36 +970,116 @@ var App = (function() {
 })();
 
 /* =====================================================================
-   SANDBOX 7: API SETTINGS — Key storage (reference file pattern)
+   SANDBOX 7: API SETTINGS — Gemini engine with quota tracking & cascade
+   Reference: SCPDD_v3.html [D9] GEMINIAPI
+   Models: gemini-2.5-pro → 3.5-flash → 2.5-flash
+   Daily quota: 25 · 500 · 500
    ===================================================================== */
 var ApiSettings = (function() {
-  var API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
-  var MODEL_CASCADE = [
-    'gemini-2.5-pro',
-    'gemini-3.5-flash',
-    'gemini-3.1-flash-lite',
-    'gemini-3-flash',
-    'gemini-2.5-flash'
-  ];
-  var _keys = [];
-  var _currentKeyIndex = 0;
+  var KEY_STORE = 'trading_gemini_keys_v2';
+  var QUOTA_STORE = 'trading_gemini_quota_v1';
   var _lastError = '';
 
-  function load() {
-    try { _keys = JSON.parse(localStorage.getItem('trading_gemini_keys') || '[]'); } catch(e) { _keys = []; }
-    var k1 = document.getElementById('apiKey1');
-    var k2 = document.getElementById('apiKey2');
-    if (k1 && _keys[0]) k1.value = _keys[0];
-    if (k2 && _keys[1]) k2.value = _keys[1];
+  /* Reference model cascade — exact order from SCPDD_v3 */
+  var MODELS = [
+    'gemini-2.5-pro',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash'
+  ];
+  var MODEL_LABELS = {
+    'gemini-2.5-pro':   '2.5 Pro',
+    'gemini-3.5-flash': '3.5 Flash',
+    'gemini-2.5-flash': '2.5 Flash'
+  };
+  var QUOTA_LIMITS = {
+    'gemini-2.5-pro':   25,
+    'gemini-3.5-flash': 500,
+    'gemini-2.5-flash': 500
+  };
+
+  /* ── Key management (2-key cascade) ── */
+  function getKeys() {
+    try { return JSON.parse(localStorage.getItem(KEY_STORE)) || {}; } catch(e) { return {}; }
+  }
+  function saveKeys(k) {
+    try { localStorage.setItem(KEY_STORE, JSON.stringify(k)); } catch(e) {}
+  }
+  function getActiveKey() {
+    var k = getKeys();
+    if (k.key2 && k.use2) return k.key2;
+    return k.key1 || null;
   }
 
+  /* ── Quota tracking (daily per-model) ── */
+  function getQuota() {
+    try {
+      var q = JSON.parse(localStorage.getItem(QUOTA_STORE)) || {};
+      var today = new Date().toISOString().slice(0,10);
+      if (q.date !== today) { q = { date: today, counts: {} }; saveQuota(q); }
+      return q;
+    } catch(e) { return { date: new Date().toISOString().slice(0,10), counts: {} }; }
+  }
+  function saveQuota(q) {
+    try { localStorage.setItem(QUOTA_STORE, JSON.stringify(q)); } catch(e) {}
+  }
+  function incrementQuota(model) {
+    var q = getQuota();
+    q.counts[model] = (q.counts[model] || 0) + 1;
+    saveQuota(q);
+  }
+  function isModelQuotaOk(model) {
+    var q = getQuota();
+    var used = q.counts[model] || 0;
+    return used < (QUOTA_LIMITS[model] || 50);
+  }
+  function pickModel() {
+    for (var i = 0; i < MODELS.length; i++) {
+      if (isModelQuotaOk(MODELS[i])) return MODELS[i];
+    }
+    return MODELS[MODELS.length - 1];
+  }
+
+  /* ── Status UI ── */
+  function getStatusLabel() {
+    var q = getQuota();
+    var model = pickModel();
+    var used = q.counts[model] || 0;
+    var limit = QUOTA_LIMITS[model] || 50;
+    return MODEL_LABELS[model] + ' (' + used + '/' + limit + ')';
+  }
+  function getStatusClass() {
+    var model = pickModel();
+    var q = getQuota();
+    var used = q.counts[model] || 0;
+    var limit = QUOTA_LIMITS[model] || 50;
+    var pct = used / limit;
+    if (pct < 0.7) return 'ok';
+    if (pct < 0.95) return 'warn';
+    return 'err';
+  }
+  function updateStatusUI() {
+    var label = getStatusLabel();
+    var cls   = getStatusClass();
+    var el = document.getElementById('api-model-status');
+    if (el) { el.textContent = label; el.className = cls; }
+  }
+
+  /* ── Load / Save from UI ── */
+  function load() {
+    var k = getKeys();
+    var k1 = document.getElementById('apiKey1');
+    var k2 = document.getElementById('apiKey2');
+    if (k1) k1.value = k.key1 || '';
+    if (k2) k2.value = k.key2 || '';
+    updateStatusUI();
+  }
   function save() {
     var k1 = (document.getElementById('apiKey1').value || '').trim();
     var k2 = (document.getElementById('apiKey2').value || '').trim();
-    _keys = [k1, k2].filter(function(k){ return k !== ''; });
-    if (_keys.length === 0) { showStatus('err', 'Enter at least one API key.'); return; }
-    _currentKeyIndex = 0;
-    localStorage.setItem('trading_gemini_keys', JSON.stringify(_keys));
+    if (!k1) { showStatus('err', 'API Key 1 is required.'); return; }
+    var k = { key1: k1, key2: k2, use2: false, key1Exhausted: false, key2Exhausted: false };
+    saveKeys(k);
+    updateStatusUI();
     showStatus('ok', '✓ Keys saved! AI analysis is now active.');
   }
 
@@ -1004,58 +1091,68 @@ var ApiSettings = (function() {
     setTimeout(function(){ el.className = 'api-status'; }, 4000);
   }
 
-  function hasKeys() { return _keys.length > 0; }
+  function hasKeys() { return !!getActiveKey(); }
   function getLastError() { return _lastError; }
 
-  // Core caller — exact pattern from reference file
-  // startModelIndex: 0=Pro (Reduce), 1=Flash (Chat), 2=Lite (Map)
+  /* ── Core cascade caller (async, returns text or null) ── */
+  // startModelIndex: 0=Pro (reduce), 1=Flash (chat), 2=Flash (last resort)
   async function callGeminiApi(prompt, startModelIndex) {
-    if (_keys.length === 0) { _lastError = 'No API key saved.'; return null; }
-    var modelIndex = startModelIndex || 0;
-    while (modelIndex < MODEL_CASCADE.length) {
-      var model = MODEL_CASCADE[modelIndex];
-      var apiKey = _keys[_currentKeyIndex];
+    var apiKey = getActiveKey();
+    if (!apiKey) { _lastError = 'No API key saved.'; return null; }
+    var modelIdx = startModelIndex || 0;
+
+    while (modelIdx < MODELS.length) {
+      var model = MODELS[modelIdx];
+      if (!isModelQuotaOk(model)) { modelIdx++; continue; }
       try {
-        var response = await fetch(API_BASE + model + ':generateContent?key=' + apiKey, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
-          })
-        });
-        if (response.status === 429) {
-          _currentKeyIndex++;
-          if (_currentKeyIndex >= _keys.length) { _currentKeyIndex = 0; modelIndex++; }
+        var res = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + apiKey,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+            })
+          }
+        );
+        if (res.status === 429) {
+          /* Quota — switch key or next model */
+          var k = getKeys();
+          if (!k.use2 && k.key2) { k.use2 = true; saveKeys(k); }
+          else { modelIdx++; }
           continue;
         }
-        if (!response.ok) {
-          var errData = await response.json();
-          _lastError = model + ' → HTTP ' + response.status + ': ' + (errData.error && errData.error.message || '');
+        if (!res.ok) {
+          var errData = await res.json();
+          _lastError = model + ' HTTP ' + res.status + ': ' + (errData.error && errData.error.message || '');
           console.warn('[Gemini]', _lastError);
-          modelIndex++;
+          /* Key error — try key2 */
+          if ((errData.error && errData.error.message||'').toLowerCase().includes('key')) {
+            var k2 = getKeys();
+            if (!k2.use2 && k2.key2) { k2.use2 = true; saveKeys(k2); continue; }
+          }
+          modelIdx++;
           continue;
         }
-        var data = await response.json();
+        var data = await res.json();
         var text = data.candidates && data.candidates[0] &&
                    data.candidates[0].content && data.candidates[0].content.parts &&
                    data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-        if (text) return text;
-        modelIndex++;
+        if (text) { incrementQuota(model); updateStatusUI(); return text; }
+        modelIdx++;
       } catch(e) {
         _lastError = model + ' → ' + e.message;
         console.warn('[Gemini]', _lastError);
-        modelIndex++;
+        modelIdx++;
       }
     }
+    _lastError = 'All models exhausted. Check API key or quota.';
     return null;
   }
 
   load();
-  function getKey() { return _keys[_currentKeyIndex] || _keys[0] || null; }
-
-  load();
-  return { save: save, hasKeys: hasKeys, getLastError: getLastError, getKey: getKey, callGeminiApi: callGeminiApi };
+  return { save: save, hasKeys: hasKeys, getLastError: getLastError, callGeminiApi: callGeminiApi, updateStatusUI: updateStatusUI, getStatusLabel: getStatusLabel };
 })();
 
 /* =====================================================================
@@ -1178,7 +1275,6 @@ var AiAnalyze = (function() {
     var vid   = item.getAttribute('data-vid');
     var title = item.getAttribute('data-title') || '';
     var feed  = item.getAttribute('data-feed') || '';
-    var ytUrl = 'https://www.youtube.com/watch?v=' + vid;
 
     // Toggle existing panel
     var next = item.nextElementSibling;
@@ -1189,81 +1285,74 @@ var AiAnalyze = (function() {
     panel.innerHTML =
       '<div class="ai-panel-hdr"><span>⚡ AI Analysis</span>'+
       '<button class="ai-panel-close" onclick="this.closest(\'.ai-panel\').classList.remove(\'open\')">✕</button></div>'+
-      '<div class="ai-panel-body"><span class="spin">⟳</span> Sending video to Gemini…</div>';
+      '<div class="ai-panel-body"><span class="spin">⟳</span> Fetching transcript…</div>';
     item.insertAdjacentElement('afterend', panel);
     btn.classList.add('loading'); btn.textContent = '⟳ …';
 
     var body = panel.querySelector('.ai-panel-body');
-    var apiKey = ApiSettings.getKey();
 
-    // Use Gemini's native video understanding via fileData
-    var payload = {
-      contents: [{
-        parts: [
-          {
-            fileData: {
-              mimeType: 'video/*',
-              fileUri: ytUrl
-            }
-          },
-          {
-            text:
-              'You are an expert Indian stock market trading analyst.\n' +
-              'Watch this video carefully and analyse its ACTUAL content.\n\n' +
-              'Return a JSON object with these exact keys:\n' +
-              '"summary": 2-3 sentences on what this video specifically covers,\n' +
-              '"trading_type": array (only from: Intraday, Swing, Positional, Investment),\n' +
-              '"assets": array of instruments actually mentioned,\n' +
-              '"key_points": array of 5 specific insights from this video,\n' +
-              '"takeaways": array of 4 actionable takeaways from this video,\n' +
-              '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
-              'Pure JSON only. No markdown. No generic advice.'
-          }
-        ]
-      }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
-    };
+    // Step 1: Fetch transcript
+    var rawTranscript = await fetchTranscript(vid);
+    var hasTranscript = rawTranscript && rawTranscript.length > 200;
 
-    // gemini-2.0-flash supports native video URL understanding
-    var models = ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-2.5-flash'];
-    var finalResult = null;
+    if (hasTranscript) {
+      body.innerHTML = '<span class="spin">⟳</span> Analysing transcript…';
+    } else {
+      body.innerHTML = '<span class="spin">⟳</span> No transcript found. Trying video analysis…';
+    }
 
-    for (var m = 0; m < models.length; m++) {
-      try {
-        var res = await fetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/' + models[m] + ':generateContent?key=' + apiKey,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
-        );
-        var data = await res.json();
-        if (res.ok) {
-          var text = data.candidates && data.candidates[0] &&
-                     data.candidates[0].content && data.candidates[0].content.parts &&
-                     data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-          if (text) { finalResult = text; break; }
-        } else {
-          console.warn('[Video] ' + models[m] + ' HTTP ' + res.status, data.error && data.error.message);
-        }
-      } catch(e) { console.warn('[Video] ' + models[m], e.message); }
+    // Step 2: Build analysis prompt based on transcript
+    var promptText = 'You are an expert Indian stock market trading analyst.\n';
+    if (hasTranscript) {
+      var cleanTranscript = optimizeTranscriptForTokens(rawTranscript);
+      promptText +=
+        'Analyse this video transcript and extract the actual trading content.\n\n' +
+        'TRANSCRIPT:\n' + cleanTranscript.substring(0, 6000) + '\n\n' +
+        'Return ONLY a JSON object with these exact keys:\n' +
+        '"summary": 2-3 sentences summarising the video content,\n' +
+        '"trading_type": array (only from: Intraday, Swing, Positional, Investment),\n' +
+        '"assets": array of instruments actually mentioned (e.g. Nifty, Bank Nifty, stocks, etc.),\n' +
+        '"key_points": array of 5 specific insights mentioned in the transcript,\n' +
+        '"takeaways": array of 4 actionable takeaways from the video,\n' +
+        '"how_to_steps": array of 5-6 exact steps the presenter explains.\n' +
+        'Pure JSON only. No markdown formatting. No code blocks. No extra text.';
+    } else {
+      promptText +=
+        'Analyse the video content and return a JSON object with these exact keys:\n' +
+        '"summary": "Unable to analyse — no transcript available",\n' +
+        '"trading_type": [],\n' +
+        '"assets": [],\n' +
+        '"key_points": ["No transcript available for analysis"],\n' +
+        '"takeaways": ["Check back later or try a different video"],\n' +
+        '"how_to_steps": []\n' +
+        'Pure JSON only. No markdown. No extra text.';
     }
 
     btn.classList.remove('loading'); btn.textContent = '⚡ Analyse';
 
+    var finalResult = await ApiSettings.callGeminiApi(promptText, 0);
+
     if (!finalResult) {
-      body.innerHTML = '<span style="color:#7a2020">⚠ ' + (ApiSettings.getLastError() || 'Failed. Check API key.') + '</span>';
+      body.innerHTML = '<span style="color:#7a2020">⚠ ' + (ApiSettings.getLastError() || 'Analysis failed. Check API key.') + '</span>';
       return;
     }
 
+    // Step 3: Parse JSON from response
     try {
       var clean = finalResult.replace(/```json|```/g,'').trim();
       var s2 = clean.indexOf('{'), e2 = clean.lastIndexOf('}');
       if (s2 !== -1 && e2 !== -1) clean = clean.substring(s2, e2+1);
       var parsed = JSON.parse(clean);
-      body.innerHTML = renderHtml(parsed, true);
-      transcriptChunksGlobal = chunkText(clean, 500);
+      body.innerHTML = renderHtml(parsed, hasTranscript);
+      transcriptChunksGlobal = rawTranscript
+        ? chunkText(optimizeTranscriptForTokens(rawTranscript), 500)
+        : chunkText(JSON.stringify(parsed), 500);
       Thunder.setContext(title, feed, transcriptChunksGlobal);
     } catch(err) {
       body.innerHTML = '<div style="white-space:pre-wrap;font-size:13px;">' + finalResult.replace(/</g,'&lt;') + '</div>';
-      transcriptChunksGlobal = [finalResult];
+      transcriptChunksGlobal = rawTranscript
+        ? chunkText(optimizeTranscriptForTokens(rawTranscript), 500)
+        : [finalResult];
       Thunder.setContext(title, feed, transcriptChunksGlobal);
     }
   }
