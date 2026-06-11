@@ -334,12 +334,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
 #local-video{position:absolute;inset:0;width:100%;height:100%;background:#000;display:none}
 #local-video.lv-active{display:block}
 .lv-sb-bar{display:flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(26,74,58,0.08);border-top:1px solid rgba(26,74,58,0.15);flex-shrink:0;flex-wrap:wrap}
-.lv-sb-label{font-size:12px;color:var(--local-hl);font-weight:700;flex:1}
+
 .lv-skip-info{font-size:11px;color:var(--muted)}
-/* SponsorBlock */
 #sb-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(20,20,20,0.92);color:#fff;padding:9px 18px;border-radius:20px;font-size:13px;font-weight:700;letter-spacing:.05em;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 #sb-toast.show{opacity:1}
-#sb-status{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:4px 10px;border-radius:12px;border:1.5px solid var(--retro-hl);color:var(--retro-hl);background:rgba(123,30,46,.07);white-space:nowrap;flex-shrink:0;cursor:pointer;letter-spacing:.04em}
+
 #sb-status.active{background:var(--retro-hl);color:#f0e6d0;border-color:var(--retro-hl)}
 #sb-status.checking{opacity:.6}
 /* API tab */
@@ -631,7 +630,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
       <span style="font-size:20px">📱</span>
       <div>
         <div class="banner-title lv">Local Videos</div>
-        <div class="banner-sub">Phone Storage · Auto SponsorBlock</div>
+        <div class="banner-sub">Phone Storage</div>
       </div>
       <div class="banner-count" id="local-banner-count">No folder</div>
     </div>
@@ -766,8 +765,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
     <span class="player-ttl" id="p-title">Loading…</span>
 
     <button class="btn-orientation" id="p-orient-btn" onclick="Player.toggleOrientation()" title="Switch to Portrait">↻ Landscape</button>
-
-    <div id="sb-status" onclick="SponsorBlock.toggle()" title="SponsorBlock: Auto-skip sponsors">⚡ SB</div>
     <button class="btn-wl-player" id="p-wl-btn" onclick="Player.toggleWL()">+ Watch Later</button>
 
     <a class="btn-yt-open" id="p-yt-link" href="#" target="_blank" rel="noopener noreferrer">↗ YouTube</a>
@@ -793,8 +790,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
   </div>
 
   <div class="lv-sb-bar" id="lv-sb-bar" style="display:none">
-
-    <span class="lv-sb-label" id="lv-sb-label">⚡ SponsorBlock ready</span>
 
     <span class="lv-skip-info" id="lv-skip-info"></span>
 
@@ -1642,8 +1637,6 @@ var Player = (function() {
 
     enterFullscreenAndLock();
 
-    SponsorBlock.onVideoOpen(vid);
-
   }
 
 
@@ -1659,8 +1652,6 @@ var Player = (function() {
     exitFullscreenAndUnlock();
 
     _vid = null; _item = null;
-
-    SponsorBlock.onVideoClose();
 
     LocalVideos.closeLocal();
 
@@ -1959,70 +1950,21 @@ var UI = (function() {
     Feed.fetchFeed(
       Data.feedUrl(ch),
       function(items) { renderItems(grid, items, 0, Feed.BATCH, ch.name); },
-      function(err)   {
+      function(err) {
         if (err === 'all-failed') {
-          /* All fetches blocked (content:// origin) -- render static seed songs exactly like Trading Videos */
           var seeds = Data.getSeeds(ch);
-          if (seeds.length > 0) {
-            var note = document.createElement('div');
-            note.style.cssText = 'font-size:11px;color:var(--muted);padding:6px 12px;letter-spacing:.04em';
-            note.textContent = 'Offline mode — tap ▶ to open in YouTube';
-            grid.appendChild(note);
-            renderRetroSeeds(grid, seeds, ch.name);
-          } else {
-            var ytUrl = 'https://www.youtube.com/channel/' + (ch.channelId || '') + '/videos';
-            grid.innerHTML = '<div class="error-row" style="padding:12px;text-align:center">' +
-              '<a href="' + ytUrl + '" target="_blank" rel="noopener" style="display:inline-block;background:var(--retro-hl);color:#f0e6d0;padding:9px 20px;border-radius:4px;font-size:14px;font-weight:900;text-decoration:none">' +
-              '\u25b6 Open Channel on YouTube</a></div>';
-          }
-        } else {
-          Feed.searchYouTube(ch.name,
-            function(items) { renderItems(grid, items, 0, Feed.BATCH, ch.name); },
-            function(err2)  {
-              var ytUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(ch.name);
-              grid.innerHTML = '<div class="error-row" style="padding:12px;text-align:center">' +
-                '<div style="margin-bottom:8px;font-size:12px">⚠ Feed unavailable</div>' +
-                '<a href="' + ytUrl + '" target="_blank" rel="noopener" style="display:inline-block;background:var(--accent);color:#fff;padding:7px 16px;border-radius:4px;font-size:13px;font-weight:900;text-decoration:none">' +
-                '🔍 Search on YouTube</a></div>';
-            }
-          );
+          if (seeds.length > 0) { renderItems(grid, seeds, 0, seeds.length, ch.name); return; }
         }
+        Feed.searchYouTube(ch.name,
+          function(items) { renderItems(grid, items, 0, Feed.BATCH, ch.name); },
+          function(err2) { grid.innerHTML = '<div class="error-row">⚠ ' + Feed.esc(err2) + ' — try again later</div>'; }
+        );
       }
     );
 
   }
 
 
-
-  /* Retro seed cards: same look as feed-item but play button opens YouTube directly
-     (in-app iframe blocked by YT embed policy on content:// origins) */
-  function renderRetroSeeds(grid, seeds, feedTitle) {
-    seeds.forEach(function(it) {
-      var vid = Feed.getVid(it.link);
-      if (!vid) return;
-      var div = document.createElement('div');
-      div.className = 'feed-item';
-      div.innerHTML =
-        '<img class="item-thumb" src="' + Feed.thumbUrl(vid) + '" alt="" loading="lazy" onerror="this.style.display=&quot;none&quot;">' +
-        '<div class="item-info">' +
-          '<div class="item-title">' + Feed.esc(it.title) + '</div>' +
-          '<div class="item-date">Retro · tap to open</div>' +
-        '</div>' +
-        '<div class="item-actions">' +
-          '<button class="btn-play" data-yturl="' + Feed.esc(it.link) + '">▶</button>' +
-          '<button class="btn-wl" title="Watch Later">&#x1f550;</button>' +
-        '</div>';
-      div.querySelector('.btn-play').addEventListener('click', function() {
-        window.open(this.getAttribute('data-yturl'), '_blank', 'noopener');
-      });
-      div.querySelector('.btn-wl').addEventListener('click', function() {
-        Storage.toggle(vid, it.title, '', feedTitle, it.link);
-        this.classList.toggle('saved', Storage.has(vid));
-        this.title = Storage.has(vid) ? 'Remove from Watch Later' : 'Watch Later';
-      });
-      grid.appendChild(div);
-    });
-  }
 
   function renderItems(grid, items, start, count, feedTitle) {
 
@@ -3400,196 +3342,9 @@ var Thunder = (function() {
 
 
 /* =====================================================================
-   SANDBOX: SPONSORBLOCK — Auto-skip sponsor/intro segments
-   Uses YT.Player JS API (onReady + getCurrentTime polling)
-   API: sponsor.ajay.app/api/skipSegments (free, no key needed)
-   Categories: sponsor, intro, selfpromo, interaction
-   ===================================================================== */
-
-/* YT iframe API global callback — fired by YouTube after iframe_api.js loads */
-var _ytPlayer    = null;
-var _ytPollTimer = null;
-
-function onYouTubeIframeAPIReady() {
-  // intentionally empty — player created in SponsorBlock.onVideoOpen()
-}
-
-var SponsorBlock = (function() {
-  var _enabled    = true;
-  var _segments   = [];
-  var _vid        = null;
-  var _statusEl   = null;
-  var _toastTimer = null;
-
-  var CATEGORIES  = ['sponsor','intro','selfpromo','interaction'];
-  var CAT_LABELS  = { sponsor:'Sponsor', intro:'Intro', selfpromo:'Self-Promo',
-                      interaction:'Interaction', music_offtopic:'Off-Topic' };
-
-  function statusEl() {
-    if (!_statusEl) _statusEl = document.getElementById('sb-status');
-    return _statusEl;
-  }
-
-  function showToast(msg) {
-    var t = document.getElementById('sb-toast');
-    if (!t) return;
-    t.textContent = msg;
-    t.classList.add('show');
-    clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2800);
-  }
-
-  function setStatus(state) {
-    var el = statusEl(); if (!el) return;
-    el.classList.remove('active', 'checking');
-    if      (state === 'on')       { el.textContent = '⚡ SB ON';  el.classList.add('active');    el.title = 'SponsorBlock active — tap to disable'; }
-    else if (state === 'checking') { el.textContent = '⚡ SB …';   el.classList.add('checking'); el.title = 'SponsorBlock fetching segments…'; }
-    else if (state === 'none')     { el.textContent = '⚡ SB 0';                                  el.title = 'No SponsorBlock segments for this video'; }
-    else                           { el.textContent = '⚡ SB OFF';                                el.title = 'SponsorBlock disabled — tap to enable'; }
-  }
-
-  function toggle() {
-    _enabled = !_enabled;
-    if (_enabled) {
-      showToast('SponsorBlock ON');
-      if (_vid) load(_vid);
-      else setStatus('on');
-    } else {
-      _segments = [];
-      clearInterval(_ytPollTimer); _ytPollTimer = null;
-      setStatus('off');
-      showToast('SponsorBlock OFF');
-    }
-  }
-
-  /* Fetch segments from SponsorBlock API */
-  function load(videoId) {
-    _vid = videoId;
-    _segments = [];
-    if (!_enabled) { setStatus('off'); return; }
-    setStatus('checking');
-    var cats = encodeURIComponent(JSON.stringify(CATEGORIES));
-    fetch('https://sponsor.ajay.app/api/skipSegments?videoID=' + videoId + '&categories=' + cats)
-      .then(function(r) {
-        if (r.status === 404) { setStatus('none'); return null; }
-        if (!r.ok) { setStatus('none'); return null; }
-        return r.json();
-      })
-      .then(function(data) {
-        if (!data) return;
-        _segments = data.map(function(s) {
-          return { start: s.segment[0], end: s.segment[1], category: s.category, skipped: false };
-        }).sort(function(a, b) { return a.start - b.start; });
-        setStatus(_segments.length > 0 ? 'on' : 'none');
-        if (_segments.length > 0) {
-          showToast('⚡ ' + _segments.length + ' segment' + (_segments.length > 1 ? 's' : '') + ' to skip');
-          startPoll();
-        }
-      })
-      .catch(function() { setStatus('none'); });
-  }
-
-  /* Poll YT.Player.getCurrentTime() every 800ms */
-  function startPoll() {
-    clearInterval(_ytPollTimer);
-    _ytPollTimer = setInterval(function() {
-      if (!_enabled || !_segments.length) return;
-      if (!_ytPlayer || typeof _ytPlayer.getCurrentTime !== 'function') return;
-      var t;
-      try { t = _ytPlayer.getCurrentTime(); } catch(e) { return; }
-      if (typeof t !== 'number') return;
-      checkAndSkip(t);
-    }, 800);
-  }
-
-  function checkAndSkip(t) {
-    for (var i = 0; i < _segments.length; i++) {
-      var seg = _segments[i];
-      if (seg.skipped) continue;
-      if (t >= seg.start && t < seg.start + 1.2) {
-        seg.skipped = true;
-        var label = CAT_LABELS[seg.category] || seg.category;
-        showToast('⏭ Skipped ' + label + ' (' + Math.round(seg.end - seg.start) + 's)');
-        try { _ytPlayer.seekTo(seg.end + 0.3, true); } catch(e) {}
-        (function(s) { setTimeout(function() { s.skipped = false; }, 12000); })(seg);
-        break;
-      }
-    }
-  }
-
-  /* Called by Player.open() */
-  function onVideoOpen(videoId) {
-    _segments = [];
-    _vid = null;
-    clearInterval(_ytPollTimer); _ytPollTimer = null;
-
-    // Destroy previous YT.Player instance
-    if (_ytPlayer) { try { _ytPlayer.destroy(); } catch(e) {} _ytPlayer = null; }
-
-    var iframe = document.getElementById('player-iframe');
-    if (!iframe) return;
-
-    // Wait 1.5s for iframe src to load before attaching YT.Player
-    setTimeout(function() {
-      if (typeof YT === 'undefined' || typeof YT.Player === 'undefined') {
-        // YT API not ready yet — wait another 2s and retry once
-        setTimeout(function() {
-          if (typeof YT !== 'undefined' && typeof YT.Player !== 'undefined') {
-            _initYTPlayer(iframe, videoId);
-          } else {
-            // Final fallback: just load segments, rely on postMessage listener
-            load(videoId);
-          }
-        }, 2000);
-        return;
-      }
-      _initYTPlayer(iframe, videoId);
-    }, 1500);
-  }
-
-  function _initYTPlayer(iframe, videoId) {
-    try {
-      _ytPlayer = new YT.Player(iframe, {
-        events: {
-          onReady: function() { load(videoId); },
-          onError: function() { setStatus('none'); }
-        }
-      });
-    } catch(e) {
-      // Constructor failed (e.g. iframe already managed) — load segments directly
-      load(videoId);
-    }
-  }
-
-  /* Fallback: postMessage time events from YT iframe */
-  window.addEventListener('message', function(e) {
-    if (!_enabled || !_segments.length) return;
-    var data;
-    try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch(ex) { return; }
-    var t = null;
-    if (data && data.info && typeof data.info.currentTime === 'number') t = data.info.currentTime;
-    if (t === null) return;
-    checkAndSkip(t);
-  });
-
-  /* Called by Player.close() */
-  function onVideoClose() {
-    _segments = [];
-    _vid = null;
-    clearInterval(_ytPollTimer); _ytPollTimer = null;
-    if (_ytPlayer) { try { _ytPlayer.destroy(); } catch(e) {} _ytPlayer = null; }
-    setStatus('on');
-  }
-
-  return { load: load, toggle: toggle, onVideoOpen: onVideoOpen, onVideoClose: onVideoClose };
-})();
-
-/* =====================================================================
-   SANDBOX: LOCAL VIDEOS — Phone folder picker + HTML5 player + SponsorBlock
+   SANDBOX: LOCAL VIDEOS — Phone folder picker + HTML5 player
    Uses File System Access API (showDirectoryPicker) where available,
    falls back to <input type=file webkitdirectory> for Safari/older browsers.
-   SponsorBlock: searches YouTube oEmbed by filename to get videoId,
-   then fetches segments from sponsor.ajay.app
    ===================================================================== */
 var LocalVideos = (function() {
   var _files      = [];      // [{file, name, ext, url, sbVid, sbSegs, sbStatus}]
@@ -3610,7 +3365,7 @@ var LocalVideos = (function() {
   function _count()     { return document.getElementById('local-file-count'); }
   function _fname()     { return document.getElementById('local-folder-name'); }
   function _banner()    { return document.getElementById('local-banner-count'); }
-  function _sbLabel()   { return document.getElementById('lv-sb-label'); }
+  function _sbLabel()   { return null; } // SB label element removed
   function _sbInfo()    { return document.getElementById('lv-skip-info'); }
   function _sbBar()     { return document.getElementById('lv-sb-bar'); }
 
@@ -3831,7 +3586,7 @@ var LocalVideos = (function() {
     if (wlBtn) wlBtn.style.display = 'none';
 
     // Disable YT SponsorBlock polling (we use our own for local)
-    SponsorBlock.onVideoClose();
+    // (SponsorBlock removed)
 
     // Open overlay + fullscreen
     var overlay = document.getElementById('player-overlay');
