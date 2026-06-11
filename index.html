@@ -297,6 +297,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
 .retro-card-arrow{display:flex;align-items:center;padding:0 14px 0 8px;color:rgba(123,30,46,0.3);font-size:16px;transition:color .15s;flex-shrink:0}
 .retro-card:hover .retro-card-arrow{color:var(--retro-hl)}
 .retro-hidden{display:none!important}
+/* SponsorBlock */
+#sb-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(20,20,20,0.92);color:#fff;padding:9px 18px;border-radius:20px;font-size:13px;font-weight:700;letter-spacing:.05em;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+#sb-toast.show{opacity:1}
+#sb-status{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:4px 10px;border-radius:12px;border:1.5px solid var(--retro-hl);color:var(--retro-hl);background:rgba(123,30,46,.07);white-space:nowrap;flex-shrink:0;cursor:pointer;letter-spacing:.04em}
+#sb-status.active{background:var(--retro-hl);color:#f0e6d0;border-color:var(--retro-hl)}
+#sb-status.checking{opacity:.6}
 /* API tab */
 
 .tab-btn.tab-apisettings.active{color:var(--api-hl)}
@@ -473,6 +479,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
   </div>
 
 </div>
+
+<div id="sb-toast"></div>
 
 <div class="app-body">
 
@@ -683,6 +691,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
 
     <button class="btn-orientation" id="p-orient-btn" onclick="Player.toggleOrientation()" title="Switch to Portrait">↻ Landscape</button>
 
+    <div id="sb-status" onclick="SponsorBlock.toggle()" title="SponsorBlock: Auto-skip sponsors">⚡ SB</div>
     <button class="btn-wl-player" id="p-wl-btn" onclick="Player.toggleWL()">+ Watch Later</button>
 
     <a class="btn-yt-open" id="p-yt-link" href="#" target="_blank" rel="noopener noreferrer">↗ YouTube</a>
@@ -896,7 +905,7 @@ var Feed = (function() {
 
   function embedUrl(vid) {
 
-    return 'https://www.youtube.com/embed/' + vid + '?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&showinfo=0&fs=1';
+    return 'https://www.youtube.com/embed/' + vid + '?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&showinfo=0&fs=1&enablejsapi=1&origin=' + encodeURIComponent(location.origin || 'file://');
 
   }
 
@@ -1456,6 +1465,8 @@ var Player = (function() {
 
     enterFullscreenAndLock();
 
+    SponsorBlock.onVideoOpen(vid);
+
   }
 
 
@@ -1471,6 +1482,8 @@ var Player = (function() {
     exitFullscreenAndUnlock();
 
     _vid = null; _item = null;
+
+    SponsorBlock.onVideoClose();
 
   }
 
@@ -3162,6 +3175,176 @@ var Thunder = (function() {
 
 
 
+
+/* =====================================================================
+   SANDBOX: SPONSORBLOCK — Auto-skip sponsor/intro segments
+   Calls sponsor.ajay.app/api/skipSegments (free public API)
+   Works by polling the YT iframe postMessage API every second.
+   Categories skipped: sponsor, intro, selfpromo, interaction
+   ===================================================================== */
+var SponsorBlock = (function() {
+  var _enabled   = true;       // on by default
+  var _segments  = [];         // [{start, end, category}]
+  var _vid       = null;
+  var _pollTimer = null;
+  var _statusEl  = null;
+  var _toastTimer= null;
+
+  var CATEGORIES = ['sponsor','intro','selfpromo','interaction'];
+  var CAT_LABELS = {sponsor:'Sponsor', intro:'Intro', selfpromo:'Self-Promo', interaction:'Interaction', music_offtopic:'Off-Topic'};
+
+  function statusEl() {
+    if (!_statusEl) _statusEl = document.getElementById('sb-status');
+    return _statusEl;
+  }
+
+  function showToast(msg) {
+    var t = document.getElementById('sb-toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2800);
+  }
+
+  function setStatus(state) { // 'on' | 'off' | 'checking' | 'none'
+    var el = statusEl(); if (!el) return;
+    el.classList.remove('active','checking');
+    if (state === 'on')       { el.textContent = '⚡ SB ON';  el.classList.add('active');    el.title='SponsorBlock active — tap to disable'; }
+    else if (state === 'checking') { el.textContent = '⚡ SB …'; el.classList.add('checking'); el.title='SponsorBlock fetching segments…'; }
+    else if (state === 'none')    { el.textContent = '⚡ SB 0';  el.title='SponsorBlock: no segments found for this video'; }
+    else                          { el.textContent = '⚡ SB OFF'; el.title='SponsorBlock disabled — tap to enable'; }
+  }
+
+  function toggle() {
+    _enabled = !_enabled;
+    if (_enabled) {
+      showToast('SponsorBlock ON');
+      if (_vid) load(_vid);
+      else setStatus('on');
+    } else {
+      _segments = [];
+      clearInterval(_pollTimer); _pollTimer = null;
+      setStatus('off');
+      showToast('SponsorBlock OFF');
+    }
+  }
+
+  /* fetch segments from public SponsorBlock API */
+  function load(videoId) {
+    _vid = videoId;
+    _segments = [];
+    if (!_enabled) { setStatus('off'); return; }
+    setStatus('checking');
+    var cats = encodeURIComponent(JSON.stringify(CATEGORIES));
+    var url  = 'https://sponsor.ajay.app/api/skipSegments?videoID=' + videoId + '&categories=' + cats;
+    fetch(url)
+      .then(function(r) {
+        if (r.status === 404) { setStatus('none'); return null; }
+        if (!r.ok) { setStatus('on'); return null; }
+        return r.json();
+      })
+      .then(function(data) {
+        if (!data) return;
+        _segments = data.map(function(s) {
+          return { start: s.segment[0], end: s.segment[1], category: s.category, uuid: s.UUID, skipped: false };
+        }).sort(function(a,b){ return a.start - b.start; });
+        setStatus(_segments.length > 0 ? 'on' : 'none');
+        if (_segments.length > 0) {
+          showToast('⚡ ' + _segments.length + ' segment' + (_segments.length > 1 ? 's' : '') + ' to skip');
+          startPoll();
+        }
+      })
+      .catch(function() { setStatus('on'); }); // fail silently — still show as on
+  }
+
+  /* Poll the iframe for current time via postMessage */
+  function startPoll() {
+    clearInterval(_pollTimer);
+    var iframe = document.getElementById('player-iframe');
+    if (!iframe) return;
+
+    // Ask YT iframe API for current time every 1s
+    _pollTimer = setInterval(function() {
+      if (!_enabled || !_segments.length) return;
+      try {
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: 'listening',
+          id: 1
+        }), '*');
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: 'command',
+          func: 'getCurrentTime',
+          args: ''
+        }), '*');
+      } catch(e) {}
+    }, 800);
+  }
+
+  /* Listen for time updates from the iframe */
+  window.addEventListener('message', function(e) {
+    if (!_enabled || !_segments.length) return;
+    var data;
+    try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch(ex) { return; }
+
+    // YT iframe API sends currentTime in info object
+    var currentTime = null;
+    if (data && data.info && typeof data.info.currentTime === 'number') {
+      currentTime = data.info.currentTime;
+    } else if (data && typeof data.currentTime === 'number') {
+      currentTime = data.currentTime;
+    }
+    if (currentTime === null) return;
+
+    for (var i = 0; i < _segments.length; i++) {
+      var seg = _segments[i];
+      if (seg.skipped) continue;
+      // If we're within the first 0.5s of a segment, skip to its end
+      if (currentTime >= seg.start && currentTime < seg.start + 0.5) {
+        seg.skipped = true;
+        var label = CAT_LABELS[seg.category] || seg.category;
+        showToast('⏭ Skipped ' + label + ' (' + Math.round(seg.end - seg.start) + 's)');
+        seekTo(seg.end + 0.2);
+        // Reset skipped flag after 10s so seek-back can re-trigger
+        (function(s){ setTimeout(function(){ s.skipped = false; }, 10000); })(seg);
+        break;
+      }
+    }
+  });
+
+  function seekTo(t) {
+    var iframe = document.getElementById('player-iframe');
+    if (!iframe) return;
+    try {
+      iframe.contentWindow.postMessage(JSON.stringify({
+        event: 'command',
+        func: 'seekTo',
+        args: [t, true]
+      }), '*');
+    } catch(e) {}
+  }
+
+  /* Called by Player.open() */
+  function onVideoOpen(videoId) {
+    // Reset skipped flags for new video
+    _segments.forEach(function(s){ s.skipped = false; });
+    _segments = [];
+    _vid = null;
+    clearInterval(_pollTimer); _pollTimer = null;
+    // Small delay to let iframe load before starting poll
+    setTimeout(function(){ load(videoId); }, 1800);
+  }
+
+  /* Called by Player.close() */
+  function onVideoClose() {
+    _segments = [];
+    _vid = null;
+    clearInterval(_pollTimer); _pollTimer = null;
+    setStatus('on');
+  }
+
+  return { load: load, toggle: toggle, onVideoOpen: onVideoOpen, onVideoClose: onVideoClose };
+})();
 
 /* =====================================================================
 
