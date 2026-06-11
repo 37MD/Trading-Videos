@@ -780,6 +780,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);background-image:repe
     <video id="local-video" playsinline controls preload="metadata"></video>
 
   </div>
+    <video id="local-video" playsinline controls preload="metadata"></video>
+
+  </div>
 
   <div class="player-info">
 
@@ -950,7 +953,125 @@ var Data = (function() {
 
   function feedUrl(ch) { return 'https://www.youtube.com/feeds/videos.xml?channel_id=' + ch.channelId; }
 
-  return { series: series, videos: videos, retro: retro, feedUrl: feedUrl };
+
+  /* Static seed videos per retro channel -- instant fallback when all fetches fail */
+  var staticSeeds = {
+    "UCFXM2q9sQwgs10AgVAgI2pQ":[
+      {link:"https://www.youtube.com/watch?v=dXFPdJY7g0g",title:"Lag Ja Gale",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=kDOoKwMqSvI",title:"Ajeeb Dastan Hai Yeh",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=BI3Dc4GQcbc",title:"Aye Mere Watan Ke Logo",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=N9ieBxQBpDU",title:"Tere Bina Zindagi",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=zM7EJqrJl3w",title:"Laga Chunari Mein Daag",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=nTn1Xh5N5OQ",title:"Piya Tose Naina",pubDate:""}],
+    "UCifkBOjTeBDTCaOhgaBIBXQ":[
+      {link:"https://www.youtube.com/watch?v=IHSulFGFHl4",title:"Dum Maro Dum",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=f9AuNr4gF5E",title:"Piya Tu Ab To Aaja",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=mfqEgmSJPaA",title:"In Aankhon Ki Masti",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=bFrq0B3Bd6Y",title:"Chura Liya Hai Tumne",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=oN5LqSBN7mY",title:"O Mere Sona Re",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=VJRSH8oiimw",title:"Yeh Mera Dil",pubDate:""}],
+    "UC4r62JngSYbAdewTRW8POBw":[
+      {link:"https://www.youtube.com/watch?v=e6B0Nf9bMGQ",title:"Tere Liye",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=F3v6BPjGp7Y",title:"Mera Saaya",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=rLT6LJkKhkA",title:"Baharon Phool Barsao",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=2b7Cd6MJNmY",title:"Woh Shaam Kuch Ajeeb Thi",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=sKT6Rb8P3_E",title:"Neel Kamal",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=cFmXoT6XMHM",title:"O Sajna Barkha Bahar Aai",pubDate:""}],
+    "UCOq_phR9Fi_eUwNweVXlQIw":[
+      {link:"https://www.youtube.com/watch?v=jKbLRfPMjXU",title:"Tum Hi Mere Mandir",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=lSW9vA01kBs",title:"Raina Beeti Jaye",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=tGQ39b7-bvA",title:"Chalte Chalte",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=4tz0JJY8qrE",title:"Kabhi Kabhi Mere Dil Mein",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=VPRjCeoBqrI",title:"Ae Dil Hai Mushkil",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=rqzGq8Dno-I",title:"Jhilmil Sitaron Ka",pubDate:""}],
+    "UCf22AHQwzfxciCzqXw51hrw":[
+      {link:"https://www.youtube.com/watch?v=nGlUwLFAVyA",title:"Abhi Na Jao Chhod Kar",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=VZ2pLjkFH_c",title:"Yeh Jo Mohabbat Hai",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=2MZxqLbHDhk",title:"Teri Galiyon Mein",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=qYRbM2faMy0",title:"Tum Jo Mil Gaye Ho",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=Y91UtQ_nrFs",title:"Baharon Phool Barsao (Rafi)",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=6oXr0cSCXMc",title:"Dil Ke Jharoke Mein",pubDate:""}],
+    "UCLpyDLYPCmQYxt_kkU1suhg":[
+      {link:"https://www.youtube.com/watch?v=XmE5YGgGlh8",title:"Kya Hua Tera Wada",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=7f5J7rVNGpA",title:"Hum Kisi Se Kum Nahin",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=YpLLIMX_6Yg",title:"Pardah Hai Pardah",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=jcH4p3o7PFI",title:"Ek Hasina Thi",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=LnVb-X3CVDE",title:"Suhana Safar",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=YjqAJPcQXOI",title:"Mujhe Teri Mohabbat Ka",pubDate:""}],
+    "UCO-Z0CRgX71ppIE5fG3h-BA":[
+      {link:"https://www.youtube.com/watch?v=XtJOxiTqZho",title:"Chahunga Main Tujhe",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=PaHi23hg2Ro",title:"Bahut Shukria",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=bh8bHdD3XFY",title:"Ehsaan Tera Hoga",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=P0zT1GGJt-Y",title:"Meri Duniya Tu Hi Re",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=mG4YT2Z7Dpw",title:"Aaj Mausam Bada Beimaan Hai",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=0TH1X4BIQLU",title:"Din Dhal Jaye",pubDate:""}],
+    "UCUtiakEY50DGSg71EPKizUQ":[
+      {link:"https://www.youtube.com/watch?v=cSJJGgPdj8E",title:"Roop Tera Mastana",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=IgP6fAl5zN4",title:"Mere Sapnon Ki Rani",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=Dvy1PiLIaxM",title:"Yeh Shaam Mastani",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=5CDZkFqF5LY",title:"Aane Se Uske Aaye Bahar",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=j7SHY9SzniU",title:"Pal Pal Dil Ke Paas",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=xVDlJ3Y8b7k",title:"Musafir Hoon Yaaron",pubDate:""}],
+    "UCpxeKxLhvpSFBSQ0t_ryXAQ":[
+      {link:"https://www.youtube.com/watch?v=KLmFVSGKzv0",title:"Ek Ladki Bheegi Bhagi Si",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=QRiznMjC_qA",title:"Oh Hansini",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=FZsJCrNQH3k",title:"Zindagi Ek Safar",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=Kzx_xSLUL3k",title:"Yeh Jo Mohabbat Hai (Kishore)",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=8Fkrh3eBMhg",title:"Do Lafzon Ki Hai",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=6f8zO6TRpDk",title:"Bheegi Bheegi Raaton Mein",pubDate:""}],
+    "UCdHdDoTYJKqe4BOB6Naunow":[
+      {link:"https://www.youtube.com/watch?v=cMZ3pJmV7F0",title:"Mere Mehboob Qayamat Hogi",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=ICtJm7TMVRY",title:"Pyar Diwana Hota Hai",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=N91tFXs7yMg",title:"Hume Tumse Pyar Kitna",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=bqr6JNm3mUc",title:"Tere Bina Jiya Jaye Na",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=L8t9y_LNc8k",title:"Agar Tum Na Hote",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=oBxaZS38SUk",title:"Main Shayar Toh Nahin",pubDate:""}],
+    "UCFyOqHZfSBxFkM3z0agNa0A":[
+      {link:"https://www.youtube.com/watch?v=6LKf0IYg9bQ",title:"Dilbar Mere Kab Tak Mujhe",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=sNjVkJJOVSQ",title:"Tere Bina Zindagi Se Koi Shikwa",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=vGbKDWLfB50",title:"Na Koi Umang Hai",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=xDIiPYHBD90",title:"Chura Liya Hai Tumne",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=0WLXH2aAcMo",title:"Yeh Vaada Raha",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=RiZiHoQNTsY",title:"Aap Jaisa Koi",pubDate:""}],
+    "UCu7JNpsN3laCVJhNX1JiS3Q":[
+      {link:"https://www.youtube.com/watch?v=bRTMx4fMBiE",title:"Ajeeb Dastan Hai Yeh (Carvaan)",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=OxFkUb4J__U",title:"Mere Naina Sawan Bhadon",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=pJ9yI5d1lGI",title:"Jaane Kya Tune Kahi",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=5STZ_RqO1To",title:"Pukarta Chala Hoon Main",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=T6z9BTz6E7c",title:"O Mere Dil Ke Chain",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=Zi2J9k-vvh8",title:"Yeh Sham Mastani (Carvaan)",pubDate:""}],
+    "UCTDqkqS3p7CSXzxqPeqHoHg":[
+      {link:"https://www.youtube.com/watch?v=K1e5pV_kLb8",title:"Ankhiyon Ke Jharokhon Se",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=5rQBLKjGrWc",title:"Yeh Galiyan Yeh Chaubara",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=Ag8C-G7UPYM",title:"Ek Pyaar Ka Nagma Hai",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=Zf3dPzVd8fE",title:"Phir Wahi Raat Hai",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=gdU_y6r0LbA",title:"Raina Beeti Jaye (T-Series)",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=yS4Uh3Tc03U",title:"Manzilen Apni Jagah Hain",pubDate:""}],
+    "UCNJfzjsGRJxnKFKhLKpHKkA":[
+      {link:"https://www.youtube.com/watch?v=8M3eMPlxYaI",title:"Pyar Hua Iqrar Hua",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=oIKqj3w0VC0",title:"Suhani Raat Dhal Chuki",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=zY3XCN5BVKo",title:"Awara Hoon",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=HHEdlQ3d7UM",title:"Mera Joota Hai Japani",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=X1cEJZGNSM0",title:"Didi Tera Devar",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=oXzDHe0xsUE",title:"Mere Desh Ki Dharti",pubDate:""}],
+    "UCq-Fj5jknLsUf-MWSy4_brA":[
+      {link:"https://www.youtube.com/watch?v=BddP6PYo2gs",title:"Kesariya",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=Umqb9KENgmk",title:"Tum Hi Ho",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=AFvS9sQF8QM",title:"Raataan Lambiyan",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=4APx8_1EQCY",title:"Teri Mitti",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=jHNNMj5bNQw",title:"Judaai",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=3USiFqBMtxA",title:"Dil Diyan Gallan",pubDate:""}],
+    "UCFFbwnve3yF62-tVXkTyHqg":[
+      {link:"https://www.youtube.com/watch?v=Im9OQNUATZY",title:"Tujhe Kitna Chahne Lage",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=z7Bfs6MfEro",title:"Phir Bhi Tumko Chahungo",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=YBIGNNFVdwg",title:"Mere Naam Tu",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=M0tmVSxJbnc",title:"Pachtaoge",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=b1mtBQMXzZU",title:"Bekhayali",pubDate:""},
+      {link:"https://www.youtube.com/watch?v=TRRGGnMBnnM",title:"Lut Gaye",pubDate:""}]
+  };
+  function getSeeds(ch) { return staticSeeds[ch.channelId] || []; }
+
+  return { series: series, videos: videos, retro: retro, feedUrl: feedUrl, getSeeds: getSeeds };
 
 })();
 
@@ -1057,212 +1178,183 @@ var Feed = (function() {
 
 
   function fetchFeed(feedUrl, onSuccess, onError) {
-
-    /* ── Attempt 1: Direct fetch from browser (residential IP, CORS * allowed) ── */
-
-    fetch(feedUrl, { mode: 'cors', cache: 'no-store' })
-
-      .then(function(r) {
-
-        if (!r.ok) throw new Error('direct ' + r.status);
-
-        return r.text();
-
-      })
-
-      .then(function(xml) {
-
+    /* Robust async cascade: direct -> rss2json -> allorigins -> corsproxy -> codetabs -> XHR
+       Works from file://, content://, and https:// origins. */
+    (async function() {
+      function parseOrThrow(xml, label) {
         var items = parseXMLItems(xml);
+        if (items.length === 0) throw new Error(label + ' empty');
+        return items;
+      }
 
-        if (items.length > 0) { onSuccess(items); return; }
+      /* 1. Direct fetch -- YT RSS sends CORS * so works from most origins */
+      try {
+        var r1 = await fetch(feedUrl, { cache: 'no-store' });
+        if (!r1.ok) throw new Error('direct ' + r1.status);
+        return onSuccess(parseOrThrow(await r1.text(), 'direct'));
+      } catch(e1) {}
 
-        throw new Error('direct empty');
+      /* 2. rss2json */
+      try {
+        var r2 = await fetch('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feedUrl));
+        var d2 = await r2.json();
+        if (d2.status === 'ok' && d2.items && d2.items.length > 0) {
+          var items2 = d2.items.filter(function(i){ return i.link && getVid(i.link); });
+          if (items2.length > 0) return onSuccess(items2);
+        }
+        throw new Error('rss2json empty');
+      } catch(e2) {}
 
-      })
+      /* 3. allorigins */
+      try {
+        var r3 = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(feedUrl));
+        var d3 = await r3.json();
+        return onSuccess(parseOrThrow(d3.contents || '', 'allorigins'));
+      } catch(e3) {}
 
-      .catch(function() {
+      /* 4. corsproxy.io */
+      try {
+        var r4 = await fetch('https://corsproxy.io/?' + encodeURIComponent(feedUrl));
+        if (!r4.ok) throw new Error('corsproxy ' + r4.status);
+        return onSuccess(parseOrThrow(await r4.text(), 'corsproxy'));
+      } catch(e4) {}
 
-        /* ── Attempt 2: rss2json (works when not rate-limited) ── */
+      /* 5. codetabs */
+      try {
+        var r5 = await fetch('https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(feedUrl));
+        if (!r5.ok) throw new Error('codetabs ' + r5.status);
+        return onSuccess(parseOrThrow(await r5.text(), 'codetabs'));
+      } catch(e5) {}
 
-        fetch('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feedUrl))
+      /* 6. XMLHttpRequest -- different CORS handling in some Android WebViews */
+      try {
+        var xhrResult = await new Promise(function(res, rej) {
+          var x = new XMLHttpRequest();
+          x.open('GET', feedUrl, true);
+          x.timeout = 8000;
+          x.onload = function() {
+            if (x.status >= 200 && x.status < 300) res(x.responseText);
+            else rej(new Error('xhr ' + x.status));
+          };
+          x.onerror = function() { rej(new Error('xhr network error')); };
+          x.ontimeout = function() { rej(new Error('xhr timeout')); };
+          x.send();
+        });
+        return onSuccess(parseOrThrow(xhrResult, 'xhr'));
+      } catch(e6) {}
+
+      /* All failed -- pass sentinel so caller shows YT link, not proxy error */
+      onError('all-failed');
+    })();
+  }
+
+/* ── Attempt 6: YouTube search via multi-proxy + oEmbed (backup when RSS broken) ── */
+
+  function searchYouTube(channelName, onSuccess, onError) {
+
+    var ytSearchUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(channelName);
+
+
+
+    /* Try allorigins first (handles file:// well), then corsproxy, then codetabs */
+
+    var proxies = [
+
+      { url: 'https://api.allorigins.win/get?url=' + encodeURIComponent(ytSearchUrl), json: true },
+
+      { url: 'https://corsproxy.io/?' + encodeURIComponent(ytSearchUrl), json: false },
+
+      { url: 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(ytSearchUrl), json: false }
+
+    ];
+
+
+
+    function extractIds(html) {
+
+      var videoIds = [], seen = {};
+
+      var re = /"videoId":"([a-zA-Z0-9_-]{11})"/g, m;
+
+      while ((m = re.exec(html)) !== null) {
+
+        if (!seen[m[1]]) { seen[m[1]] = true; videoIds.push(m[1]); }
+
+        if (videoIds.length >= 15) break;
+
+      }
+
+      return videoIds;
+
+    }
+
+
+
+    function fetchTitlesAndReturn(videoIds) {
+
+      var fetches = videoIds.map(function(vid) {
+
+        return fetch('https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=' + vid + '&format=json')
 
           .then(function(r) { return r.json(); })
 
           .then(function(d) {
 
-            if (d.status === 'ok' && d.items && d.items.length > 0) {
-
-              var items = d.items.filter(function(i) { return i.link && getVid(i.link); });
-
-              if (items.length > 0) { onSuccess(items); return; }
-
-            }
-
-            throw new Error('rss2json empty');
+            return { link: 'https://www.youtube.com/watch?v=' + vid, title: d.title || 'Untitled', pubDate: '', thumbnail: d.thumbnail_url || thumbUrl(vid) };
 
           })
 
           .catch(function() {
 
-            /* ── Attempt 3: allorigins ── */
-
-            fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(feedUrl))
-
-              .then(function(r) { return r.json(); })
-
-              .then(function(d) {
-
-                var items = parseXMLItems(d.contents || '');
-
-                if (items.length > 0) { onSuccess(items); return; }
-
-                throw new Error('allorigins empty');
-
-              })
-
-              .catch(function() {
-
-                /* ── Attempt 4: corsproxy.io ── */
-
-                fetch('https://corsproxy.io/?' + encodeURIComponent(feedUrl))
-
-                  .then(function(r) {
-
-                    if (!r.ok) throw new Error('corsproxy ' + r.status);
-
-                    return r.text();
-
-                  })
-
-                  .then(function(xml) {
-
-                    var items = parseXMLItems(xml);
-
-                    if (items.length > 0) { onSuccess(items); return; }
-
-                    throw new Error('corsproxy empty');
-
-                  })
-
-                  .catch(function() {
-
-                    /* ── Attempt 5: codetabs ── */
-
-                    fetch('https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(feedUrl))
-
-                      .then(function(r) {
-
-                        if (!r.ok) throw new Error('codetabs ' + r.status);
-
-                        return r.text();
-
-                      })
-
-                      .then(function(xml) {
-
-                        var items = parseXMLItems(xml);
-
-                        if (items.length > 0) { onSuccess(items); }
-
-                        else { onError('No videos found — all sources failed'); }
-
-                      })
-
-                      .catch(function(e) { onError(e.message || 'All sources failed'); });
-
-                  });
-
-              });
+            return { link: 'https://www.youtube.com/watch?v=' + vid, title: 'Untitled', pubDate: '', thumbnail: thumbUrl(vid) };
 
           });
 
       });
 
-  }
+      Promise.all(fetches).then(function(items) { onSuccess(items); });
+
+    }
 
 
 
-  /* ── Attempt 6: YouTube search via codetabs + oEmbed (backup when RSS broken) ── */
+    function tryProxy(idx) {
 
-  function searchYouTube(channelName, onSuccess, onError) {
+      if (idx >= proxies.length) { onError('Search failed \u2014 all proxies exhausted'); return; }
 
-    var query = encodeURIComponent(channelName + ' stock market');
+      var p = proxies[idx];
 
-    fetch('https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://www.youtube.com/results?search_query=' + query))
+      fetch(p.url)
 
-      .then(function(r) {
+        .then(function(r) {
 
-        if (!r.ok) throw new Error('search page ' + r.status);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
 
-        return r.text();
+          return p.json ? r.json() : r.text();
 
-      })
+        })
 
-      .then(function(html) {
+        .then(function(d) {
 
-        var videoIds = [], seen = {};
+          var html = p.json ? (d.contents || '') : d;
 
-        var re = /"videoId":"([a-zA-Z0-9_-]{11})"/g, m;
+          if (typeof html !== 'string' || html.length < 200) throw new Error('empty');
 
-        while ((m = re.exec(html)) !== null) {
+          var ids = extractIds(html);
 
-          var vid = m[1];
+          if (ids.length === 0) throw new Error('no IDs');
 
-          if (!seen[vid]) { seen[vid] = true; videoIds.push(vid); }
+          fetchTitlesAndReturn(ids);
 
-          if (videoIds.length >= 15) break;
+        })
 
-        }
+        .catch(function() { tryProxy(idx + 1); });
 
-        if (videoIds.length === 0) { onError('No videos found on YouTube'); return; }
+    }
 
-        /* fetch oEmbed for each video to get title */
 
-        var fetches = videoIds.map(function(vid) {
 
-          return fetch('https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=' + vid + '&format=json')
-
-            .then(function(r) { return r.json(); })
-
-            .then(function(d) {
-
-              return {
-
-                link: 'https://www.youtube.com/watch?v=' + vid,
-
-                title: d.title || 'Untitled',
-
-                pubDate: '',
-
-                thumbnail: d.thumbnail_url || thumbUrl(vid)
-
-              };
-
-            })
-
-            .catch(function() {
-
-              return {
-
-                link: 'https://www.youtube.com/watch?v=' + vid,
-
-                title: 'Untitled',
-
-                pubDate: '',
-
-                thumbnail: thumbUrl(vid)
-
-              };
-
-            });
-
-        });
-
-        Promise.all(fetches).then(function(items) { onSuccess(items); });
-
-      })
-
-      .catch(function(e) { onError(e.message || 'search failed'); });
+    tryProxy(0);
 
   }
 
@@ -1865,28 +1957,72 @@ var UI = (function() {
 
 
     Feed.fetchFeed(
-
       Data.feedUrl(ch),
-
       function(items) { renderItems(grid, items, 0, Feed.BATCH, ch.name); },
-
       function(err)   {
-
-        Feed.searchYouTube(ch.name,
-
-          function(items) { renderItems(grid, items, 0, Feed.BATCH, ch.name); },
-
-          function(err2)  { grid.innerHTML = '<div class="error-row">⚠ ' + Feed.esc(err2) + ' — try again later</div>'; }
-
-        );
-
+        if (err === 'all-failed') {
+          /* All fetches blocked (content:// origin) -- render static seed songs exactly like Trading Videos */
+          var seeds = Data.getSeeds(ch);
+          if (seeds.length > 0) {
+            var note = document.createElement('div');
+            note.style.cssText = 'font-size:11px;color:var(--muted);padding:6px 12px;letter-spacing:.04em';
+            note.textContent = 'Offline mode — tap ▶ to open in YouTube';
+            grid.appendChild(note);
+            renderRetroSeeds(grid, seeds, ch.name);
+          } else {
+            var ytUrl = 'https://www.youtube.com/channel/' + (ch.channelId || '') + '/videos';
+            grid.innerHTML = '<div class="error-row" style="padding:12px;text-align:center">' +
+              '<a href="' + ytUrl + '" target="_blank" rel="noopener" style="display:inline-block;background:var(--retro-hl);color:#f0e6d0;padding:9px 20px;border-radius:4px;font-size:14px;font-weight:900;text-decoration:none">' +
+              '\u25b6 Open Channel on YouTube</a></div>';
+          }
+        } else {
+          Feed.searchYouTube(ch.name,
+            function(items) { renderItems(grid, items, 0, Feed.BATCH, ch.name); },
+            function(err2)  {
+              var ytUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(ch.name);
+              grid.innerHTML = '<div class="error-row" style="padding:12px;text-align:center">' +
+                '<div style="margin-bottom:8px;font-size:12px">⚠ Feed unavailable</div>' +
+                '<a href="' + ytUrl + '" target="_blank" rel="noopener" style="display:inline-block;background:var(--accent);color:#fff;padding:7px 16px;border-radius:4px;font-size:13px;font-weight:900;text-decoration:none">' +
+                '🔍 Search on YouTube</a></div>';
+            }
+          );
+        }
       }
-
     );
 
   }
 
 
+
+  /* Retro seed cards: same look as feed-item but play button opens YouTube directly
+     (in-app iframe blocked by YT embed policy on content:// origins) */
+  function renderRetroSeeds(grid, seeds, feedTitle) {
+    seeds.forEach(function(it) {
+      var vid = Feed.getVid(it.link);
+      if (!vid) return;
+      var div = document.createElement('div');
+      div.className = 'feed-item';
+      div.innerHTML =
+        '<img class="item-thumb" src="' + Feed.thumbUrl(vid) + '" alt="" loading="lazy" onerror="this.style.display=&quot;none&quot;">' +
+        '<div class="item-info">' +
+          '<div class="item-title">' + Feed.esc(it.title) + '</div>' +
+          '<div class="item-date">Retro · tap to open</div>' +
+        '</div>' +
+        '<div class="item-actions">' +
+          '<button class="btn-play" data-yturl="' + Feed.esc(it.link) + '">▶</button>' +
+          '<button class="btn-wl" title="Watch Later">&#x1f550;</button>' +
+        '</div>';
+      div.querySelector('.btn-play').addEventListener('click', function() {
+        window.open(this.getAttribute('data-yturl'), '_blank', 'noopener');
+      });
+      div.querySelector('.btn-wl').addEventListener('click', function() {
+        Storage.toggle(vid, it.title, '', feedTitle, it.link);
+        this.classList.toggle('saved', Storage.has(vid));
+        this.title = Storage.has(vid) ? 'Remove from Watch Later' : 'Watch Later';
+      });
+      grid.appendChild(div);
+    });
+  }
 
   function renderItems(grid, items, start, count, feedTitle) {
 
